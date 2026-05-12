@@ -14,6 +14,8 @@ MVP requirements:
 - Codex CLI only for the first working release.
 - Use Codex `UserPromptSubmit` for pre-prompt advice.
 - Use Codex `Stop` or transcript updates to refresh summaries.
+- Track agent kind, agent version, adapter version, and supported capabilities
+  for compatibility and debugging.
 - No wrapper command for normal prompt entry.
 - No automatic agent launch, resume, or spawning.
 - Keep hook execution fast: target under 500 ms, hard timeout under 2 seconds.
@@ -68,59 +70,107 @@ flowchart LR
     Codex --> Logs[Codex Transcripts]
     Hooks --> Core[Threadwise Core]
     Logs --> Core
-    Core --> SQLite[(SQLite)]
+    Core --> SQLite[(SQLite Metadata)]
+    Core --> LanceDB[(LanceDB Vectors)]
     Core --> Output[Short Advice or No-op]
 ```
 
 Core responsibilities:
 
 - Normalize hook input and transcript turns.
+- Maintain the agent registry and capability map.
 - Track active session objective, touched files, commands, and open questions.
-- Search recent sessions inside the TTL window.
+- Search recent sessions inside the TTL window using content, vectors, and
+  project metadata.
 - Score `continue_current`, `resume_existing`, and `open_new_agent`.
 - Generate a handoff prompt when a split is recommended.
 
 Adapter responsibilities:
 
+- Report agent kind, executable path, version, adapter version, and capabilities.
 - Install hook instructions.
 - Read transcripts.
 - Detect active sessions for the current repo.
 - Provide resume hints where the agent supports them.
 
+Normalized agent identity:
+
+| Field | Example | Purpose |
+| --- | --- | --- |
+| `agent_kind` | `codex`, `claude_code`, `opencode`, `cursor`, `vscode_copilot` | Stable product family |
+| `agent_version` | `codex-cli 0.x.y` | Detect behavior and transcript changes |
+| `adapter_version` | `threadwise-codex-adapter 0.x.y` | Debug parser and hook compatibility |
+| `executable_path` | `/opt/homebrew/bin/codex` | Know which binary produced the session |
+| `capabilities` | `hooks`, `resume`, `transcripts`, `spawn_hint` | Decide what advice Threadwise can safely give |
+| `workspace_root` | `/repo/path` | Scope matching to the active project |
+
+The adapter boundary is the agent wiring layer. Each adapter translates one
+agent's hooks, transcript layout, resume command, and version detection into
+the normalized event schema. The core should not know Codex or Claude-specific
+file formats. Agent and adapter versions are tracking metadata only; they are
+not primary lookup signals. Ranking should depend on content similarity, repo,
+recency, files, commands, and active task state.
+
+Client wiring should be easy:
+
+```text
+threadwise init codex
+threadwise connect codex
+threadwise source add local ~/.codex/sessions --agent codex
+threadwise doctor
+```
+
+`init` installs or prints hook config. `connect` auto-detects agent binary,
+version, config path, transcript path, and supported capabilities. `source add
+local` lets a user register a transcript/session directory explicitly when
+auto-detection is wrong or unsupported.
+
 ## Storage
 
-Use SQLite for the MVP, including embeddings.
+Use SQLite for metadata and LanceDB for vectors in the MVP.
 
-Tables:
+SQLite tables:
 
-- `sessions`: agent, session id, repo root, title, status, timestamps.
+- `agents`: agent kind, agent version, adapter version, executable path,
+  capabilities, first seen, last seen.
+- `sessions`: agent id, session id, repo root, title, status, timestamps.
 - `turns`: session id, role, content, files mentioned, commands mentioned.
 - `summaries`: session id, objective, state, touched files, open questions,
-  embedding.
+  vector id.
 - `recommendations`: action, confidence, reason, selected session, timestamp.
 - `handoffs`: recommendation id, generated prompt, timestamp.
+
+LanceDB tables:
+
+- `session_vectors`: vector id, session id, agent id, repo root, summary kind,
+  embedding, text hash, created_at.
 
 Search should be hybrid from the start:
 
 - SQLite FTS/BM25 for exact terms, file names, commands, and symbols.
-- Local embeddings for semantic similarity between prompts and session
+- LanceDB vector search for semantic similarity between prompts and session
   summaries.
 - Metadata boosts for same repo, recent activity, same files, and same command
   history.
+- Agent identity and version metadata should be used for compatibility filters
+  and diagnostics, not as ranking shortcuts.
 
 Embeddings are necessary for useful recommendations. Without them, Threadwise
 will miss paraphrases like "audit tests" versus "review coverage" and will
-overfit to shared filenames or command names. A heavy vector database is not
-necessary for the MVP; local vector search inside SQLite is enough.
+overfit to shared filenames or command names. LanceDB is the preferred vector
+store because it is embedded, has a Rust SDK, and is more production-oriented
+than `sqlite-vec`. Keep the vector layer behind an internal `VectorIndex`
+interface so `sqlite-vec` or brute-force SQLite can still be used as a fallback.
 
 Preferred MVP stack:
 
 - Embedding model: small local ONNX model such as `BAAI/bge-small-en-v1.5` or
   `sentence-transformers/all-MiniLM-L6-v2`.
-- Embedding runtime: `fastembed-rs` if building in Rust, or Qdrant
-  `fastembed` if prototyping in Python.
-- Vector store: `sqlite-vec` or a simple SQLite BLOB column plus brute-force
-  cosine search while the dataset is small.
+- Embedding runtime: `fastembed-rs`.
+- Metadata store: SQLite.
+- Vector store: LanceDB.
+- Fallback vector store: `sqlite-vec` or a simple SQLite BLOB column plus
+  brute-force cosine search while the dataset is small.
 
 Operational rule: precompute session-summary embeddings after turns stop. The
 pre-prompt hook should only embed the new prompt and query cached session
@@ -147,16 +197,26 @@ Packaging requirements:
 
 Implementation implication:
 
-- Prefer Go or Rust if single-binary distribution is the priority.
-- Python is acceptable for prototyping, but packaging is heavier.
-- If Python is used first, keep the core portable enough to rewrite or package
-  with a standalone tool later.
+- Use Rust for the MVP because LanceDB and `fastembed-rs` both have native
+  Rust support.
+- Do not use Go for the first implementation if LanceDB is required. The Go
+  LanceDB SDK is community-driven and uses CGO/native artifacts, which makes
+  packaging less direct for a small installable CLI.
+- Go can still be useful later for thin clients or integrations that call a
+  stable Threadwise CLI/API.
+- Keep the vector and embedding layers behind traits so release packaging can
+  fall back to a simpler local index if a platform has issues.
 
 ## Commands
 
 MVP commands:
 
 - `threadwise init codex`: install or print Codex hook configuration.
+- `threadwise connect codex`: auto-detect Codex binary, version, config, hooks,
+  transcript path, and capabilities.
+- `threadwise source add local <path> --agent <kind>`: register a local
+  transcript/session directory explicitly.
+- `threadwise adapters`: list detected agents, versions, and capabilities.
 - `threadwise status`: show active session, related sessions, and advice.
 - `threadwise handoff`: print the current split handoff prompt.
 - `threadwise sessions`: list recent sessions for the current repo.
@@ -171,18 +231,24 @@ Hook commands:
 ## Build Plan
 
 1. Define the normalized event schema.
-2. Build the SQLite store.
-3. Read Codex transcripts under `~/.codex/sessions`.
-4. Detect the active Codex session for the current repo.
-5. Add local embeddings and SQLite-backed vector search.
-6. Implement `threadwise status` using hybrid search and metadata scoring.
-7. Implement Codex `UserPromptSubmit` and `Stop` hook commands.
-8. Implement `threadwise handoff`.
-9. Add `threadwise init codex` and `threadwise doctor`.
-10. Add release automation for macOS and Linux multi-arch binaries.
-11. Add Homebrew and apt packaging.
-12. Tune thresholds with real Codex sessions.
-13. Add Claude Code as the second adapter after the Codex MVP is reliable.
+2. Define the adapter registry and capability model.
+3. Build the SQLite metadata store.
+4. Add LanceDB-backed `VectorIndex`.
+5. Add local embeddings with `fastembed-rs`.
+6. Implement Codex auto-detection for binary, version, config, hooks, and
+   transcript path.
+7. Read Codex transcripts under `~/.codex/sessions`.
+8. Detect the active Codex session for the current repo.
+9. Implement `threadwise status` using hybrid search and metadata scoring.
+10. Implement Codex `UserPromptSubmit` and `Stop` hook commands.
+11. Implement `threadwise handoff`.
+12. Add `threadwise init codex`, `threadwise connect codex`,
+    `threadwise source add local`, `threadwise adapters`, and
+    `threadwise doctor`.
+13. Add release automation for macOS and Linux multi-arch binaries.
+14. Add Homebrew and apt packaging.
+15. Tune thresholds with real Codex sessions.
+16. Add Claude Code as the second adapter after the Codex MVP is reliable.
 
 ## Later
 
@@ -216,5 +282,6 @@ Embedding and vector support:
 | --- | ---: | ---: | --- | --- | --- |
 | [`fastembed`](https://github.com/qdrant/fastembed) | 2k+ | 196 | Mature lightweight embedding library | Local ONNX embedding generation | Good Python prototype path |
 | [`fastembed-rs`](https://github.com/Anush008/fastembed-rs) | 600+ | 89 | Practical Rust embedding library | Local ONNX embedding generation in a compiled binary | Best fit if Rust is chosen for distribution |
-| [`sqlite-vec`](https://github.com/asg017/sqlite-vec) | 7k+ | 300+ | Pre-v1 but widely watched | Local vector search inside SQLite | Best fit for single-file local storage |
-| [`LanceDB`](https://github.com/lancedb/lancedb) | 10k+ | 800+ | Strong embedded vector DB | Embedded vector and hybrid search | Good fallback if SQLite vector support is too limited |
+| [`LanceDB`](https://github.com/lancedb/lancedb) | 10k+ | 800+ | Strong embedded vector DB | Embedded vector and hybrid search | Preferred MVP vector store |
+| [`sqlite-vec`](https://github.com/asg017/sqlite-vec) | 7k+ | 300+ | Pre-v1 but widely watched | Local vector search inside SQLite | Fallback if LanceDB packaging is too heavy |
+| [`lancedb-go`](https://github.com/lancedb/lancedb-go) | n/a | n/a | Community SDK; CGO/native artifacts | Go access to LanceDB | Not the MVP path; useful later if Go clients are needed |
