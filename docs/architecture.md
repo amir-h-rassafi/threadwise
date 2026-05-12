@@ -99,7 +99,7 @@ Normalized agent identity:
 | --- | --- | --- |
 | `agent_kind` | `codex`, `claude_code`, `opencode`, `cursor`, `vscode_copilot` | Stable product family |
 | `agent_version` | `codex-cli 0.x.y` | Detect behavior and transcript changes |
-| `adapter_version` | `threadwise-codex-adapter 0.x.y` | Debug parser and hook compatibility |
+| `adapter_version` | `tw-codex-adapter 0.x.y` | Debug parser and hook compatibility |
 | `executable_path` | `/opt/homebrew/bin/codex` | Know which binary produced the session |
 | `capabilities` | `hooks`, `resume`, `transcripts`, `spawn_hint` | Decide what advice Threadwise can safely give |
 | `workspace_root` | `/repo/path` | Scope matching to the active project |
@@ -114,10 +114,10 @@ recency, files, commands, and active task state.
 Client wiring should be easy:
 
 ```text
-threadwise init codex
-threadwise connect codex
-threadwise source add local ~/.codex/sessions --agent codex
-threadwise doctor
+tw init codex
+tw connect codex
+tw source add local ~/.codex/sessions --agent codex
+tw doctor
 ```
 
 `init` installs or prints hook config. `connect` auto-detects agent binary,
@@ -183,7 +183,7 @@ Threadwise should feel instant to install and run.
 
 Packaging requirements:
 
-- Ship a single `threadwise` binary where possible.
+- Ship a single `tw` binary where possible.
 - Homebrew formula for macOS and Linuxbrew.
 - Debian package and apt repository for Linux users.
 - Release archives for direct download.
@@ -192,8 +192,8 @@ Packaging requirements:
   - `darwin-amd64`
   - `linux-amd64`
   - `linux-arm64`
-- Smoke-test every release artifact with `threadwise --version` and
-  `threadwise doctor`.
+- Smoke-test every release artifact with `tw --version` and
+  `tw doctor`.
 
 Implementation implication:
 
@@ -203,7 +203,7 @@ Implementation implication:
   LanceDB SDK is community-driven and uses CGO/native artifacts, which makes
   packaging less direct for a small installable CLI.
 - Go can still be useful later for thin clients or integrations that call a
-  stable Threadwise CLI/API.
+  stable `tw` CLI/API.
 - Keep the vector and embedding layers behind traits so release packaging can
   fall back to a simpler local index if a platform has issues.
 
@@ -211,22 +211,22 @@ Implementation implication:
 
 MVP commands:
 
-- `threadwise init codex`: install or print Codex hook configuration.
-- `threadwise connect codex`: auto-detect Codex binary, version, config, hooks,
+- `tw init codex`: install or print Codex hook configuration.
+- `tw connect codex`: auto-detect Codex binary, version, config, hooks,
   transcript path, and capabilities.
-- `threadwise source add local <path> --agent <kind>`: register a local
+- `tw source add local <path> --agent <kind>`: register a local
   transcript/session directory explicitly.
-- `threadwise adapters`: list detected agents, versions, and capabilities.
-- `threadwise status`: show active session, related sessions, and advice.
-- `threadwise handoff`: print the current split handoff prompt.
-- `threadwise sessions`: list recent sessions for the current repo.
-- `threadwise explain`: show why the last recommendation was made.
-- `threadwise doctor`: validate hooks, transcript access, store, and version.
+- `tw adapters`: list detected agents, versions, and capabilities.
+- `tw status`: show active session, related sessions, and advice.
+- `tw handoff`: print the current split handoff prompt.
+- `tw sessions`: list recent sessions for the current repo.
+- `tw explain`: show why the last recommendation was made.
+- `tw doctor`: validate hooks, transcript access, store, and version.
 
 Hook commands:
 
-- `threadwise hook codex-user-prompt-submit`
-- `threadwise hook codex-stop`
+- `tw hook codex-user-prompt-submit`
+- `tw hook codex-stop`
 
 ## Build Plan
 
@@ -239,12 +239,12 @@ Hook commands:
    transcript path.
 7. Read Codex transcripts under `~/.codex/sessions`.
 8. Detect the active Codex session for the current repo.
-9. Implement `threadwise status` using hybrid search and metadata scoring.
+9. Implement `tw status` using hybrid search and metadata scoring.
 10. Implement Codex `UserPromptSubmit` and `Stop` hook commands.
-11. Implement `threadwise handoff`.
-12. Add `threadwise init codex`, `threadwise connect codex`,
-    `threadwise source add local`, `threadwise adapters`, and
-    `threadwise doctor`.
+11. Implement `tw handoff`.
+12. Add `tw init codex`, `tw connect codex`,
+    `tw source add local`, `tw adapters`, and
+    `tw doctor`.
 13. Add release automation for macOS and Linux multi-arch binaries.
 14. Add Homebrew and apt packaging.
 15. Tune thresholds with real Codex sessions.

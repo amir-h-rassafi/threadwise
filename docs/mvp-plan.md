@@ -24,16 +24,16 @@ normal Codex usage.
 
 ## MVP Success Criteria
 
-- `threadwise init codex` can install or print Codex hook config.
-- `threadwise connect codex` can detect Codex binary, version, config, hooks,
+- `tw init codex` can install or print Codex hook config.
+- `tw connect codex` can detect Codex binary, version, config, hooks,
   transcript path, and supported capabilities.
-- `threadwise source add local <path> --agent codex` can register an explicit
+- `tw source add local <path> --agent codex` can register an explicit
   session source.
-- `threadwise status` can show the current session and related sessions for
+- `tw status` can show the current session and related sessions for
   the active repo.
-- `threadwise hook codex-user-prompt-submit` usually returns no output, but
+- `tw hook codex-user-prompt-submit` usually returns no output, but
   returns short advice when confidence is high.
-- `threadwise handoff` can print a copy-ready prompt for a new focused agent.
+- `tw handoff` can print a copy-ready prompt for a new focused agent.
 - Hook execution targets under 500 ms and hard-times-out under 2 seconds.
 - Everything works offline after the local embedding model is present.
 
@@ -62,27 +62,27 @@ Storage:
 Setup commands:
 
 ```text
-threadwise init codex
-threadwise connect codex
-threadwise source add local ~/.codex/sessions --agent codex
-threadwise doctor
+tw init codex
+tw connect codex
+tw source add local ~/.codex/sessions --agent codex
+tw doctor
 ```
 
 Daily commands:
 
 ```text
-threadwise status
-threadwise sessions
-threadwise handoff
-threadwise explain
-threadwise adapters
+tw status
+tw sessions
+tw handoff
+tw explain
+tw adapters
 ```
 
 Hook commands:
 
 ```text
-threadwise hook codex-user-prompt-submit
-threadwise hook codex-stop
+tw hook codex-user-prompt-submit
+tw hook codex-stop
 ```
 
 ## Data Model
@@ -116,8 +116,8 @@ content similarity, repo, recency, files, commands, and task state.
 Deliver:
 
 - Cargo project.
-- `threadwise --version`.
-- `threadwise doctor`.
+- `tw --version`.
+- `tw doctor`.
 - Config directory resolution.
 - Basic logging and error formatting.
 
@@ -130,11 +130,11 @@ Done when:
 
 Deliver:
 
-- `threadwise connect codex`.
+- `tw connect codex`.
 - Detect Codex executable path and version.
 - Detect config path and likely transcript path.
 - Persist agent and source metadata.
-- `threadwise adapters`.
+- `tw adapters`.
 
 Done when:
 
@@ -152,7 +152,7 @@ Deliver:
 
 Done when:
 
-- `threadwise sessions` lists recent sessions for the current repo.
+- `tw sessions` lists recent sessions for the current repo.
 - Re-running ingestion is idempotent.
 
 ### M3: Summaries And Search
@@ -167,7 +167,7 @@ Deliver:
 
 Done when:
 
-- `threadwise status` shows current session plus top related sessions.
+- `tw status` shows current session plus top related sessions.
 - Similar task wording matches even when exact words differ.
 
 ### M4: Advice Engine
@@ -178,7 +178,7 @@ Deliver:
 - Produce short reason text.
 - Generate handoff prompt for `open_new_agent`.
 - Store recommendation and handoff history.
-- `threadwise explain`.
+- `tw explain`.
 
 Done when:
 
@@ -189,9 +189,9 @@ Done when:
 
 Deliver:
 
-- `threadwise init codex`.
-- `threadwise hook codex-user-prompt-submit`.
-- `threadwise hook codex-stop`.
+- `tw init codex`.
+- `tw hook codex-user-prompt-submit`.
+- `tw hook codex-stop`.
 - Timeout enforcement.
 - No-op fallback on internal errors.
 
@@ -212,7 +212,7 @@ Deliver:
 
 Done when:
 
-- Fresh install can run `threadwise doctor`.
+- Fresh install can run `tw doctor`.
 - Fresh install can connect to Codex and index a local source.
 
 ## First Implementation Slice
@@ -240,5 +240,5 @@ Mitigations:
 
 - Keep adapters versioned and isolated.
 - Keep `VectorIndex` swappable.
-- Add `threadwise doctor` checks for model, DB, source, and hook state.
+- Add `tw doctor` checks for model, DB, source, and hook state.
 - Default to no output unless confidence is high.

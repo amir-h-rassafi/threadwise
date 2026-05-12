@@ -2,6 +2,8 @@
 
 A lightweight local session advisor for CLI coding agents.
 
+The project is Threadwise; the developer-facing CLI is `tw`.
+
 The goal is to keep normal agent usage intact while giving the user a second
 pair of eyes on session hygiene. Threadwise watches recent local agent
 transcripts and project state, then suggests whether to continue in the current
