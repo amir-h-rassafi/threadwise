@@ -22,5 +22,5 @@ Initial scope:
 - Produces actionable handoff prompts when a new agent is the right move.
 - Adds other agents, editors, and MCP after the Codex MVP is reliable.
 
-See [docs/architecture.md](docs/architecture.md) for the initial architecture and
-build plan.
+See [docs/architecture.md](docs/architecture.md) for architecture and
+[docs/mvp-plan.md](docs/mvp-plan.md) for the implementation plan.
