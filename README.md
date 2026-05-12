@@ -10,15 +10,17 @@ session, resume a related session, or open a new agent with a focused handoff.
 Initial scope:
 
 - Works locally first.
-- Reads recent session transcripts from supported agents.
-- Uses agent pre-prompt hooks where available, with transcript watching as a
+- Starts with Codex CLI for the MVP.
+- Reads recent Codex session transcripts.
+- Uses Codex pre-prompt hooks where available, with transcript watching as a
   fallback.
-- Targets CLI agents and editor-hosted agents, including VS Code/Copilot and
-  Cursor where plugin or hook APIs are available.
+- Installs quickly through Homebrew and apt once packaged.
+- Ships multi-arch builds for Linux and macOS.
 - Keeps a short configurable memory window, such as 1-14 days.
-- Uses vector search plus metadata filters to find related sessions.
+- Starts with fast local search plus metadata filters to find related sessions.
 - Starts as a read-only advisor, not a wrapper around any single agent.
 - Produces actionable handoff prompts when a new agent is the right move.
+- Adds other agents, editors, and MCP after the Codex MVP is reliable.
 
 See [docs/architecture.md](docs/architecture.md) for the initial architecture and
 build plan.
