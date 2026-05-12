@@ -26,3 +26,16 @@ Initial scope:
 
 See [docs/architecture.md](docs/architecture.md) for architecture and
 [docs/mvp-plan.md](docs/mvp-plan.md) for the implementation plan.
+
+## Development
+
+Run the local CLI through Cargo:
+
+```text
+cargo run -- doctor
+cargo run -- connect codex
+cargo run -- source add local ~/.codex/sessions --agent codex
+```
+
+Release builds are produced by the GitHub Actions release workflow when a
+`v*` tag is pushed.
