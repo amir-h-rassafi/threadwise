@@ -27,6 +27,21 @@ Future adapters should reuse the same core contract for Claude Code, OpenCode,
 VS Code / Copilot agents, Cursor, and other agent CLIs, but they are not MVP
 blockers.
 
+## Initial Scope
+
+- Work locally first.
+- Start with Codex CLI for the MVP.
+- Read recent Codex session transcripts.
+- Use Codex pre-prompt hooks where available, with transcript watching as a
+  fallback.
+- Install quickly through Homebrew and apt once packaged.
+- Ship multi-arch builds for Linux and macOS.
+- Keep a short configurable memory window, such as 1-14 days.
+- Use fast local search plus metadata filters to find related sessions.
+- Stay read-only and avoid wrapping any single agent's normal prompt entry.
+- Produce actionable handoff prompts when a new agent is the right move.
+- Add other agents, editors, and MCP after the Codex MVP is reliable.
+
 ## User Loop
 
 1. User works in Codex normally.
