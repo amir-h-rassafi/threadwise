@@ -17,6 +17,7 @@ MVP requirements:
 - No wrapper command for normal prompt entry.
 - No automatic agent launch, resume, or spawning.
 - Keep hook execution fast: target under 500 ms, hard timeout under 2 seconds.
+- Use local embeddings for semantic matching.
 - Work offline and local-first.
 - Store only short-lived session metadata by default.
 
@@ -88,19 +89,43 @@ Adapter responsibilities:
 
 ## Storage
 
-Use SQLite for the MVP.
+Use SQLite for the MVP, including embeddings.
 
 Tables:
 
 - `sessions`: agent, session id, repo root, title, status, timestamps.
 - `turns`: session id, role, content, files mentioned, commands mentioned.
-- `summaries`: session id, objective, state, touched files, open questions.
+- `summaries`: session id, objective, state, touched files, open questions,
+  embedding.
 - `recommendations`: action, confidence, reason, selected session, timestamp.
 - `handoffs`: recommendation id, generated prompt, timestamp.
 
-Do not add a vector database in the first cut. Start with SQLite FTS/BM25 and
-metadata boosts. Add embeddings only after real sessions show the baseline is
-not good enough.
+Search should be hybrid from the start:
+
+- SQLite FTS/BM25 for exact terms, file names, commands, and symbols.
+- Local embeddings for semantic similarity between prompts and session
+  summaries.
+- Metadata boosts for same repo, recent activity, same files, and same command
+  history.
+
+Embeddings are necessary for useful recommendations. Without them, Threadwise
+will miss paraphrases like "audit tests" versus "review coverage" and will
+overfit to shared filenames or command names. A heavy vector database is not
+necessary for the MVP; local vector search inside SQLite is enough.
+
+Preferred MVP stack:
+
+- Embedding model: small local ONNX model such as `BAAI/bge-small-en-v1.5` or
+  `sentence-transformers/all-MiniLM-L6-v2`.
+- Embedding runtime: `fastembed-rs` if building in Rust, or Qdrant
+  `fastembed` if prototyping in Python.
+- Vector store: `sqlite-vec` or a simple SQLite BLOB column plus brute-force
+  cosine search while the dataset is small.
+
+Operational rule: precompute session-summary embeddings after turns stop. The
+pre-prompt hook should only embed the new prompt and query cached session
+vectors. If embedding fails or times out, fall back to FTS/BM25 and return no
+advice unless confidence is high.
 
 ## Install And Release
 
@@ -149,14 +174,15 @@ Hook commands:
 2. Build the SQLite store.
 3. Read Codex transcripts under `~/.codex/sessions`.
 4. Detect the active Codex session for the current repo.
-5. Implement `threadwise status` using simple keyword/metadata scoring.
-6. Implement Codex `UserPromptSubmit` and `Stop` hook commands.
-7. Implement `threadwise handoff`.
-8. Add `threadwise init codex` and `threadwise doctor`.
-9. Add release automation for macOS and Linux multi-arch binaries.
-10. Add Homebrew and apt packaging.
-11. Tune thresholds with real Codex sessions.
-12. Add Claude Code as the second adapter after the Codex MVP is reliable.
+5. Add local embeddings and SQLite-backed vector search.
+6. Implement `threadwise status` using hybrid search and metadata scoring.
+7. Implement Codex `UserPromptSubmit` and `Stop` hook commands.
+8. Implement `threadwise handoff`.
+9. Add `threadwise init codex` and `threadwise doctor`.
+10. Add release automation for macOS and Linux multi-arch binaries.
+11. Add Homebrew and apt packaging.
+12. Tune thresholds with real Codex sessions.
+13. Add Claude Code as the second adapter after the Codex MVP is reliable.
 
 ## Later
 
@@ -167,12 +193,14 @@ After the Codex MVP works:
 - VS Code / Copilot extension or hook-file integration.
 - Cursor plugin or extension integration.
 - MCP surface so agents can ask Threadwise for advice.
-- Optional embeddings for better similarity search.
+- Larger or user-selectable embedding models.
 
 ## Relevant References
 
 These are useful for memory, session discovery, resume UX, and future adapter
 ideas. They are references, not MVP scope.
+
+Top related tools:
 
 | Tool | Stars | Forks | Stability | Useful for | Threadwise takeaway |
 | --- | ---: | ---: | --- | --- | --- |
@@ -181,3 +209,12 @@ ideas. They are references, not MVP scope.
 | [`Remnic`](https://github.com/joshuaswarren/remnic) | 73 | 11 | Ambitious, test-heavy, still young | Scoped memory, provenance, correction, MCP/HTTP access | Short-lived session hygiene is enough for now |
 | [`ai-sessions-mcp`](https://github.com/yoavf/ai-sessions-mcp) | 27 | 3 | Small but focused | MCP access to Claude, Codex, Gemini, and OpenCode sessions | Good reference for later MCP/session search |
 | [`cxresume`](https://github.com/lingtaolf/cxresume) | 12 | 2 | Narrow but practical | Fast Codex session discovery and resume flow | Good reference for Codex-first session discovery |
+
+Embedding and vector support:
+
+| Tool | Stars | Forks | Stability | Useful for | Threadwise takeaway |
+| --- | ---: | ---: | --- | --- | --- |
+| [`fastembed`](https://github.com/qdrant/fastembed) | 2k+ | 196 | Mature lightweight embedding library | Local ONNX embedding generation | Good Python prototype path |
+| [`fastembed-rs`](https://github.com/Anush008/fastembed-rs) | 600+ | 89 | Practical Rust embedding library | Local ONNX embedding generation in a compiled binary | Best fit if Rust is chosen for distribution |
+| [`sqlite-vec`](https://github.com/asg017/sqlite-vec) | 7k+ | 300+ | Pre-v1 but widely watched | Local vector search inside SQLite | Best fit for single-file local storage |
+| [`LanceDB`](https://github.com/lancedb/lancedb) | 10k+ | 800+ | Strong embedded vector DB | Embedded vector and hybrid search | Good fallback if SQLite vector support is too limited |
