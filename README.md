@@ -37,47 +37,57 @@ solid.
 
 ## Installation
 
-### From source (works today)
+### One-liner (recommended)
+
+```sh
+curl -sSfL https://raw.githubusercontent.com/amir-h-rassafi/threadwise/main/scripts/install.sh | sh
+```
+
+Detects your OS/arch, downloads the matching prebuilt tarball from the latest
+release, and installs `tw` to `/usr/local/bin`. No toolchain required.
+
+User install (no sudo):
+
+```sh
+curl -sSfL https://raw.githubusercontent.com/amir-h-rassafi/threadwise/main/scripts/install.sh | PREFIX=$HOME/.local sh
+```
+
+Pin a version:
+
+```sh
+curl -sSfL https://raw.githubusercontent.com/amir-h-rassafi/threadwise/main/scripts/install.sh | TW_VERSION=v0.1.1 sh
+```
+
+### From source
 
 ```sh
 git clone https://github.com/amir-h-rassafi/threadwise
 cd threadwise
 make build-release     # cargo build, run as your user
-sudo make install      # copies to /usr/local/bin/tw
+sudo make install      # copies target/release/tw to /usr/local/bin/tw
 tw --version
 ```
 
-The build and install steps are split on purpose: `cargo` lives in your user's
-rustup toolchain, but `/usr/local/bin` needs root. Running `sudo make install`
-only touches the copy step.
+The build and install steps are split because `cargo` lives in your user's
+rustup toolchain but `/usr/local/bin` needs root — `sudo make install` is
+copy-only. **After `git pull`, re-run `make build-release` before
+`sudo make install`** or you'll re-install the old binary.
 
 Overrides:
 
 ```sh
-PREFIX=$HOME/.local make build-release install   # user install, no sudo (needs ~/.local/bin on PATH)
+PREFIX=$HOME/.local make build-release install   # user install, no sudo
 DESTDIR=/tmp/stage make install                  # stage for packaging
-make install-cargo                               # alternative: cargo install --path . --locked
+make install-cargo                               # cargo install --path . --locked
 make uninstall                                   # rm $(PREFIX)/bin/tw
-```
-
-### Prebuilt binaries
-
-Tagged releases publish tarballs for `darwin-arm64`, `darwin-amd64`,
-`linux-amd64`, `linux-arm64` alongside a `SHA256SUMS` file. Grab from the
-[releases page](https://github.com/amir-h-rassafi/threadwise/releases), verify
-the checksum, and drop `tw` somewhere on your `PATH`.
-
-```sh
-curl -L -o tw.tar.gz https://github.com/amir-h-rassafi/threadwise/releases/latest/download/threadwise-darwin-arm64.tar.gz
-tar -xzf tw.tar.gz
-sudo mv threadwise-darwin-arm64/tw /usr/local/bin/
+make help                                        # list all targets
 ```
 
 ### Homebrew
 
 A formula template lives at
-[`packaging/homebrew/threadwise.rb`](packaging/homebrew/threadwise.rb) and is
-published to a tap with each release.
+[`packaging/homebrew/threadwise.rb`](packaging/homebrew/threadwise.rb); a tap
+will follow once we settle on one.
 
 ## Quickstart
 
