@@ -237,6 +237,7 @@ fn sessions() -> Result<i32, String> {
 
     println!("Registered sources");
     for source in sources {
+        let transcripts = discover_transcripts(&source.path)?;
         println!("agent: {}", source.agent);
         println!("kind: {}", source.kind);
         println!("path: {}", source.path.display());
@@ -255,6 +256,18 @@ fn sessions() -> Result<i32, String> {
             "available: {}",
             if source.path.is_dir() { "yes" } else { "no" }
         );
+        println!("transcripts: {}", transcripts.len());
+        for transcript in transcripts.iter().take(10) {
+            println!(
+                "- {} size={} modified={}",
+                transcript.display_path(&source.path),
+                transcript.bytes,
+                transcript.modified
+            );
+        }
+        if transcripts.len() > 10 {
+            println!("- ... {} more", transcripts.len() - 10);
+        }
         println!();
     }
 
@@ -265,6 +278,13 @@ fn status() -> Result<i32, String> {
     let paths = AppPaths::resolve()?;
     let sources = read_sources(&paths)?;
     let enablements = read_enablements(&paths)?;
+    let transcript_count = sources
+        .iter()
+        .map(|source| discover_transcripts(&source.path))
+        .collect::<Result<Vec<_>, _>>()?
+        .iter()
+        .map(Vec::len)
+        .sum::<usize>();
     let enabled_count = sources
         .iter()
         .filter(|source| {
@@ -276,6 +296,7 @@ fn status() -> Result<i32, String> {
     println!("Threadwise status");
     println!("registered_sources: {}", sources.len());
     println!("enabled_sources: {enabled_count}");
+    println!("discovered_transcripts: {transcript_count}");
     println!(
         "advice: {}",
         if enabled_count > 0 {
@@ -289,8 +310,10 @@ fn status() -> Result<i32, String> {
         println!("next: tw source add local ~/.codex/sessions --agent codex");
     } else if enabled_count == 0 {
         println!("next: tw enable codex");
+    } else if transcript_count == 0 {
+        println!("next: add or wait for agent transcript files");
     } else {
-        println!("next: transcript ingestion");
+        println!("next: transcript parsing");
     }
 
     Ok(0)
@@ -389,6 +412,57 @@ fn read_to_string(path: &Path) -> Result<String, String> {
         .and_then(|mut file| file.read_to_string(&mut content))
         .map_err(|err| format!("failed to read {}: {err}", path.display()))?;
     Ok(content)
+}
+
+fn discover_transcripts(root: &Path) -> Result<Vec<TranscriptFile>, String> {
+    let mut transcripts = Vec::new();
+    if !root.is_dir() {
+        return Ok(transcripts);
+    }
+
+    visit_transcript_dir(root, &mut transcripts)?;
+    transcripts.sort_by(|left, right| right.modified.cmp(&left.modified));
+    Ok(transcripts)
+}
+
+fn visit_transcript_dir(dir: &Path, transcripts: &mut Vec<TranscriptFile>) -> Result<(), String> {
+    for entry in
+        fs::read_dir(dir).map_err(|err| format!("failed to read {}: {err}", dir.display()))?
+    {
+        let entry =
+            entry.map_err(|err| format!("failed to read entry in {}: {err}", dir.display()))?;
+        let path = entry.path();
+        let metadata = entry
+            .metadata()
+            .map_err(|err| format!("failed to read metadata for {}: {err}", path.display()))?;
+
+        if metadata.is_dir() {
+            visit_transcript_dir(&path, transcripts)?;
+        } else if is_transcript_file(&path) {
+            transcripts.push(TranscriptFile {
+                path,
+                bytes: metadata.len(),
+                modified: metadata
+                    .modified()
+                    .ok()
+                    .and_then(system_time_secs)
+                    .unwrap_or(0),
+            });
+        }
+    }
+    Ok(())
+}
+
+fn is_transcript_file(path: &Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| matches!(extension, "jsonl" | "json"))
+}
+
+fn system_time_secs(time: SystemTime) -> Option<u64> {
+    time.duration_since(UNIX_EPOCH)
+        .ok()
+        .map(|duration| duration.as_secs())
 }
 
 fn upsert_line(path: &Path, key: &str, line: &str) -> Result<(), String> {
@@ -566,6 +640,22 @@ struct SourceRecord {
     kind: String,
     path: PathBuf,
     state: String,
+}
+
+struct TranscriptFile {
+    path: PathBuf,
+    bytes: u64,
+    modified: u64,
+}
+
+impl TranscriptFile {
+    fn display_path(&self, root: &Path) -> String {
+        self.path
+            .strip_prefix(root)
+            .unwrap_or(&self.path)
+            .display()
+            .to_string()
+    }
 }
 
 struct Enablements {

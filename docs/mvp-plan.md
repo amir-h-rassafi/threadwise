@@ -188,6 +188,10 @@ Done when:
 - `tw sessions` lists recent sessions for the current repo.
 - Re-running ingestion is idempotent.
 
+Current implementation note: `tw sessions` now recursively discovers
+registered `.jsonl` and `.json` transcript files and reports the newest files
+per source. Turn parsing is the next step.
+
 ### M3: Summaries And Search
 
 Deliver:
