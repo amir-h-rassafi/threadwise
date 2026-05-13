@@ -42,18 +42,22 @@ solid.
 ```sh
 git clone https://github.com/amir-h-rassafi/threadwise
 cd threadwise
-sudo make install        # installs to /usr/local/bin/tw
+make build-release     # cargo build, run as your user
+sudo make install      # copies to /usr/local/bin/tw
 tw --version
 ```
 
-`make install` builds release and copies `tw` into `$(PREFIX)/bin` (default
-`/usr/local`). Overrides:
+The build and install steps are split on purpose: `cargo` lives in your user's
+rustup toolchain, but `/usr/local/bin` needs root. Running `sudo make install`
+only touches the copy step.
+
+Overrides:
 
 ```sh
-PREFIX=$HOME/.local make install      # user install, no sudo (needs ~/.local/bin on PATH)
-DESTDIR=/tmp/stage make install       # stage for packaging
-make install-cargo                    # alternative: cargo install --path . --locked
-make uninstall                        # rm $(PREFIX)/bin/tw
+PREFIX=$HOME/.local make build-release install   # user install, no sudo (needs ~/.local/bin on PATH)
+DESTDIR=/tmp/stage make install                  # stage for packaging
+make install-cargo                               # alternative: cargo install --path . --locked
+make uninstall                                   # rm $(PREFIX)/bin/tw
 ```
 
 ### Prebuilt binaries

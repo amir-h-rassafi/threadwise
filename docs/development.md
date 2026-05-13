@@ -16,18 +16,28 @@ make check            # fmt-check + lint + test
 make ci               # build + check (mirrors GitHub Actions)
 make run -- <args>    # cargo run -- <args>
 make doctor           # cargo run -q -- doctor
-make install          # build release + install to $(PREFIX)/bin/tw (default /usr/local)
+make build-release    # cargo build --release --locked
+make install          # install target/release/tw to $(PREFIX)/bin/tw (default /usr/local)
 make uninstall        # rm $(PREFIX)/bin/tw
 make install-cargo    # alternative: cargo install --path . --locked -> $CARGO_HOME/bin
 make uninstall-cargo  # cargo uninstall threadwise
+```
+
+`install` is intentionally a **copy-only** step — it does not call cargo. This
+keeps `sudo make install` working even though cargo lives in the invoking
+user's rustup toolchain, not root's. Standard flow:
+
+```sh
+make build-release        # as your user (cargo present)
+sudo make install         # as root (copy only)
 ```
 
 `install` honors standard `PREFIX` (default `/usr/local`) and `DESTDIR`
 (default empty) overrides:
 
 ```sh
-PREFIX=$HOME/.local make install      # user install, no sudo
-DESTDIR=/tmp/stage make install       # stage for packaging
+PREFIX=$HOME/.local make build-release install   # user install, no sudo
+DESTDIR=/tmp/stage make install                  # stage for packaging
 ```
 
 ## Driving the CLI from source

@@ -3,14 +3,21 @@ BINDIR ?= $(PREFIX)/bin
 DESTDIR ?=
 INSTALL ?= install
 
-.PHONY: build test check fmt fmt-check lint clippy run doctor clean ci \
+.PHONY: build build-release test check fmt fmt-check lint clippy run doctor clean ci \
         install uninstall install-cargo uninstall-cargo
 
 build:
 	cargo build
 
-install:
+build-release:
 	cargo build --release --locked
+
+install:
+	@if [ ! -x target/release/tw ]; then \
+	  echo "error: target/release/tw not found."; \
+	  echo "build first as your user: make build-release"; \
+	  exit 1; \
+	fi
 	$(INSTALL) -d "$(DESTDIR)$(BINDIR)"
 	$(INSTALL) -m 0755 target/release/tw "$(DESTDIR)$(BINDIR)/tw"
 	@echo "installed $(DESTDIR)$(BINDIR)/tw"
