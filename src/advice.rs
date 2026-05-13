@@ -1,3 +1,4 @@
+use crate::adapters::adapter_for_kind;
 use crate::hooks::{HookEvent, HookKind};
 use crate::session_index::{IndexedSource, IndexedTranscript, SessionIndex};
 use crate::vector::{InMemoryVectorIndex, VectorIndex, embed_text};
@@ -16,6 +17,7 @@ pub struct Recommendation {
     pub reason: String,
     pub session_id: Option<String>,
     pub handoff: Option<String>,
+    pub resume_hint: Option<String>,
 }
 
 pub fn recommend_for_hook(index: &SessionIndex, event: &HookEvent) -> Option<Recommendation> {
@@ -50,6 +52,10 @@ impl Recommendation {
 
         if let Some(session_id) = &self.session_id {
             output.push_str(&format!("\nSession: {session_id}"));
+        }
+        if let Some(hint) = &self.resume_hint {
+            output.push('\n');
+            output.push_str(hint);
         }
         if let Some(handoff) = &self.handoff {
             output.push_str("\n\nSuggested handoff:\n");
@@ -107,7 +113,14 @@ fn open_new_agent(prompt: &str) -> Recommendation {
         reason: "prompt explicitly asks for a separate focused agent".to_string(),
         session_id: None,
         handoff: Some(prompt.to_string()),
+        resume_hint: None,
     }
+}
+
+fn resume_hint_for(agent: &str, session_id: &str) -> Option<String> {
+    adapter_for_kind(agent)
+        .ok()
+        .map(|adapter| adapter.resume_hint(session_id))
 }
 
 fn resume_existing(index: &SessionIndex, event: &HookEvent) -> Option<Recommendation> {
@@ -119,7 +132,6 @@ fn resume_existing(index: &SessionIndex, event: &HookEvent) -> Option<Recommenda
 
     let (source, transcript, score) =
         pick_best_match(&related, prompt).unwrap_or((related[0].0, related[0].1, 0.0));
-    let _ = source;
     let session_id = transcript.session_id.as_deref()?;
 
     if event.session_id.as_deref() == Some(session_id) {
@@ -136,6 +148,7 @@ fn resume_existing(index: &SessionIndex, event: &HookEvent) -> Option<Recommenda
         ),
         session_id: Some(session_id.to_string()),
         handoff: None,
+        resume_hint: resume_hint_for(&source.agent, session_id),
     })
 }
 
@@ -149,7 +162,7 @@ fn soft_resume(index: &SessionIndex, event: &HookEvent) -> Option<Recommendation
         return None;
     }
 
-    let (_, transcript, score) = pick_best_match(&related, prompt)?;
+    let (source, transcript, score) = pick_best_match(&related, prompt)?;
     if score < SOFT_RESUME_THRESHOLD {
         return None;
     }
@@ -168,6 +181,7 @@ fn soft_resume(index: &SessionIndex, event: &HookEvent) -> Option<Recommendation
         ),
         session_id: Some(session_id.to_string()),
         handoff: None,
+        resume_hint: resume_hint_for(&source.agent, session_id),
     })
 }
 

@@ -1,7 +1,7 @@
 class Threadwise < Formula
   desc "Local session advisor for CLI coding agents"
   homepage "https://github.com/amir-h-rassafi/threadwise"
-  version "0.1.4"
+  version "0.1.5"
   license "MIT OR Apache-2.0"
 
   on_macos do

@@ -14,6 +14,9 @@ pub trait AgentAdapter {
     fn kind(&self) -> &'static str;
     fn detect(&self, paths: &AppPaths) -> AgentDetection;
     fn init_instructions(&self) -> String;
+    fn resume_hint(&self, session_id: &str) -> String {
+        format!("Resume this {} session: {}", self.kind(), session_id)
+    }
 }
 
 pub fn available_adapters() -> Vec<Box<dyn AgentAdapter>> {
@@ -75,6 +78,10 @@ Run `tw connect codex` after updating hook configuration.
 "
         .to_string()
     }
+
+    fn resume_hint(&self, session_id: &str) -> String {
+        format!("Resume in Codex:\n  codex resume {session_id}")
+    }
 }
 
 struct ClaudeCodeAdapter;
@@ -129,6 +136,10 @@ Settings file is typically at ~/.claude/settings.json.
 Run `tw connect claude-code` after updating hooks.
 "
         .to_string()
+    }
+
+    fn resume_hint(&self, session_id: &str) -> String {
+        format!("Resume in Claude Code:\n  claude --resume {session_id}")
     }
 }
 
