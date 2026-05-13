@@ -16,8 +16,18 @@ make check            # fmt-check + lint + test
 make ci               # build + check (mirrors GitHub Actions)
 make run -- <args>    # cargo run -- <args>
 make doctor           # cargo run -q -- doctor
-make install          # cargo install --path . --locked
-make uninstall        # cargo uninstall threadwise
+make install          # build release + install to $(PREFIX)/bin/tw (default /usr/local)
+make uninstall        # rm $(PREFIX)/bin/tw
+make install-cargo    # alternative: cargo install --path . --locked -> $CARGO_HOME/bin
+make uninstall-cargo  # cargo uninstall threadwise
+```
+
+`install` honors standard `PREFIX` (default `/usr/local`) and `DESTDIR`
+(default empty) overrides:
+
+```sh
+PREFIX=$HOME/.local make install      # user install, no sudo
+DESTDIR=/tmp/stage make install       # stage for packaging
 ```
 
 ## Driving the CLI from source

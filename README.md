@@ -42,12 +42,19 @@ solid.
 ```sh
 git clone https://github.com/amir-h-rassafi/threadwise
 cd threadwise
-make install        # installs to $CARGO_HOME/bin (usually ~/.cargo/bin)
+sudo make install        # installs to /usr/local/bin/tw
 tw --version
 ```
 
-`make install` is a thin wrapper around `cargo install --path . --locked`.
-Make sure `~/.cargo/bin` is on your `PATH`.
+`make install` builds release and copies `tw` into `$(PREFIX)/bin` (default
+`/usr/local`). Overrides:
+
+```sh
+PREFIX=$HOME/.local make install      # user install, no sudo (needs ~/.local/bin on PATH)
+DESTDIR=/tmp/stage make install       # stage for packaging
+make install-cargo                    # alternative: cargo install --path . --locked
+make uninstall                        # rm $(PREFIX)/bin/tw
+```
 
 ### Prebuilt binaries
 

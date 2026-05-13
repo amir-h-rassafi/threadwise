@@ -1,12 +1,28 @@
-.PHONY: build test check fmt fmt-check lint clippy run doctor clean ci install uninstall
+PREFIX ?= /usr/local
+BINDIR ?= $(PREFIX)/bin
+DESTDIR ?=
+INSTALL ?= install
+
+.PHONY: build test check fmt fmt-check lint clippy run doctor clean ci \
+        install uninstall install-cargo uninstall-cargo
 
 build:
 	cargo build
 
 install:
-	cargo install --path . --locked
+	cargo build --release --locked
+	$(INSTALL) -d "$(DESTDIR)$(BINDIR)"
+	$(INSTALL) -m 0755 target/release/tw "$(DESTDIR)$(BINDIR)/tw"
+	@echo "installed $(DESTDIR)$(BINDIR)/tw"
 
 uninstall:
+	rm -f "$(DESTDIR)$(BINDIR)/tw"
+	@echo "removed $(DESTDIR)$(BINDIR)/tw"
+
+install-cargo:
+	cargo install --path . --locked
+
+uninstall-cargo:
 	cargo uninstall threadwise
 
 test:
