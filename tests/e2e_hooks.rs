@@ -149,6 +149,56 @@ fn enabled_hook_is_silent_for_normal_prompt() {
 }
 
 #[test]
+fn monitor_shows_last_hook_decision() {
+    let env = TestEnv::new("monitor-hook");
+    env.source_add();
+    env.enable_codex();
+
+    let output = env.hook(&hook_payload(
+        &env.workspace,
+        "update the docs based on the parser changes",
+        "current-session",
+    ));
+    assert_success(&output, "normal hook");
+
+    let output = env.tw(&["monitor"]).output().expect("run monitor");
+    assert_success(&output, "monitor");
+    let stdout = stdout(&output);
+    assert!(stdout.contains("Threadwise monitor"));
+    assert!(stdout.contains("session=current-session"));
+    assert!(stdout.contains("decision=silent"));
+
+    let log = fs::read_to_string(env.data.join("monitor").join("hook-events.jsonl"))
+        .expect("read monitor log");
+    assert!(log.contains("\"decision\":\"silent\""));
+    assert!(log.contains("\"session_id\":\"current-session\""));
+}
+
+#[test]
+fn hook_prompt_flag_records_manual_shell_test() {
+    let env = TestEnv::new("manual-hook");
+    env.source_add();
+    env.enable_codex();
+
+    let output = env
+        .tw(&[
+            "hook",
+            "codex-user-prompt-submit",
+            "--prompt",
+            "plain shell prompt",
+        ])
+        .output()
+        .expect("run manual hook");
+    assert_success(&output, "manual hook");
+
+    let output = env.tw(&["monitor"]).output().expect("run monitor");
+    assert_success(&output, "monitor");
+    let stdout = stdout(&output);
+    assert!(stdout.contains("prompt: plain shell prompt"));
+    assert!(stdout.contains("decision=silent"));
+}
+
+#[test]
 fn enabled_hook_is_silent_for_invalid_payload() {
     let env = TestEnv::new("invalid-hook");
     env.source_add();
@@ -211,6 +261,26 @@ fn hook_block_threshold_blocks_high_confidence_recommendation() {
             .expect("reason")
             .contains("Recommendation: resume existing session")
     );
+}
+
+#[test]
+fn blocking_hook_stays_silent_for_low_information_prompt() {
+    let env = TestEnv::new("short-blocking-hook");
+    env.source_add();
+    env.enable_codex();
+
+    let output = env.hook_with_args(
+        &[
+            "hook",
+            "codex-user-prompt-submit",
+            "--block-threshold",
+            "30",
+        ],
+        &hook_payload(&env.workspace, "weather", "fresh-session"),
+    );
+
+    assert_success(&output, "short prompt blocking hook");
+    assert_eq!(stdout(&output), "");
 }
 
 fn write_codex_transcript(sessions: &Path, workspace: &Path) {

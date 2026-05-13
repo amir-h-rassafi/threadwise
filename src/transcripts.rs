@@ -28,6 +28,7 @@ impl TranscriptFile {
 #[derive(Default)]
 pub struct TranscriptSummary {
     pub session_id: Option<String>,
+    pub title: Option<String>,
     pub cwd: Option<String>,
     pub cli_version: Option<String>,
     pub first_timestamp: Option<String>,
@@ -42,6 +43,7 @@ pub struct TranscriptSummary {
 }
 
 const SUMMARY_TEXT_CAP: usize = 16384;
+const TITLE_TEXT_CAP: usize = 80;
 
 pub fn discover_transcripts(root: &Path) -> Result<Vec<TranscriptFile>, String> {
     let mut transcripts = Vec::new();
@@ -171,6 +173,7 @@ fn apply_claude_code_event(value: &Value, summary: &mut TranscriptSummary) {
         "user" => {
             summary.user_messages += 1;
             if let Some(content) = message.and_then(|m| m.get("content")) {
+                capture_claude_title(content, summary);
                 append_claude_content(content, &mut summary.summary_text);
             }
         }
@@ -195,6 +198,28 @@ fn append_claude_content(content: &Value, summary_text: &mut String) {
                 && let Some(text) = item.get("text").and_then(Value::as_str)
             {
                 append_text(text, summary_text);
+            }
+        }
+    }
+}
+
+fn capture_claude_title(content: &Value, summary: &mut TranscriptSummary) {
+    if summary.title.is_some() {
+        return;
+    }
+    if let Some(text) = content.as_str() {
+        capture_title(text, summary);
+        return;
+    }
+    if let Some(items) = content.as_array() {
+        for item in items {
+            if item.get("type").and_then(Value::as_str) == Some("text")
+                && let Some(text) = item.get("text").and_then(Value::as_str)
+            {
+                capture_title(text, summary);
+                if summary.title.is_some() {
+                    return;
+                }
             }
         }
     }
@@ -227,6 +252,9 @@ fn apply_event_msg(value: &Value, summary: &mut TranscriptSummary) {
     match payload_type {
         "user_message" => {
             summary.user_messages += 1;
+            if let Some(text) = message_text(payload) {
+                capture_title(text, summary);
+            }
             append_message_text(payload, &mut summary.summary_text);
         }
         "agent_message" => {
@@ -240,14 +268,33 @@ fn apply_event_msg(value: &Value, summary: &mut TranscriptSummary) {
 }
 
 fn append_message_text(payload: &Value, summary_text: &mut String) {
-    let text = payload
+    if let Some(text) = message_text(payload) {
+        append_text(text, summary_text);
+    }
+}
+
+fn message_text(payload: &Value) -> Option<&str> {
+    payload
         .get("message")
         .or_else(|| payload.get("text"))
         .or_else(|| payload.get("content"))
-        .and_then(Value::as_str);
-    if let Some(text) = text {
-        append_text(text, summary_text);
+        .and_then(Value::as_str)
+}
+
+fn capture_title(text: &str, summary: &mut TranscriptSummary) {
+    if summary.title.is_some() {
+        return;
     }
+    summary.title = title_from_text(text);
+}
+
+fn title_from_text(text: &str) -> Option<String> {
+    let mut title = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    if title.is_empty() {
+        return None;
+    }
+    title = title.chars().take(TITLE_TEXT_CAP).collect();
+    Some(title)
 }
 
 fn append_text(text: &str, summary_text: &mut String) {
@@ -277,4 +324,41 @@ fn session_id_from_path(path: &Path) -> Option<String> {
     stem.strip_prefix("rollout-")
         .and_then(|value| value.rsplit_once('-').map(|(_, id)| id.to_string()))
         .or_else(|| Some(stem.to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_transcript;
+    use std::fs;
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn codex_title_uses_first_user_message() {
+        let path = temp_path("threadwise-title-test.jsonl");
+        fs::write(
+            &path,
+            "{\"timestamp\":\"2026-05-13T00:00:00Z\",\"type\":\"session_meta\",\"payload\":{\"id\":\"title-session\",\"cwd\":\"/work\"}}\n\
+             {\"timestamp\":\"2026-05-13T00:00:01Z\",\"type\":\"event_msg\",\"payload\":{\"type\":\"user_message\",\"message\":\"Improve documentation in README\"}}\n\
+             {\"timestamp\":\"2026-05-13T00:00:02Z\",\"type\":\"event_msg\",\"payload\":{\"type\":\"user_message\",\"message\":\"second prompt\"}}\n",
+        )
+        .expect("write transcript");
+
+        let summary = parse_transcript(&path, "codex").expect("parse transcript");
+        assert_eq!(
+            summary.title.as_deref(),
+            Some("Improve documentation in README")
+        );
+        assert!(summary.summary_text.contains("second prompt"));
+
+        let _ = fs::remove_file(path);
+    }
+
+    fn temp_path(name: &str) -> PathBuf {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time before unix epoch")
+            .as_nanos();
+        std::env::temp_dir().join(format!("{name}-{}-{nonce}", std::process::id()))
+    }
 }

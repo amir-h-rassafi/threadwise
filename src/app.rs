@@ -6,7 +6,8 @@ use crate::advice::{
     RecommendationAction, SOFT_RESUME_THRESHOLD, SUMMARY_EMBEDDING_DIM, pick_best_match,
     recommend_for_hook,
 };
-use crate::hooks::{HookEvent, HookKind, read_hook_event};
+use crate::hooks::{HookEvent, HookKind, hook_event_from_prompt, read_hook_event};
+use crate::monitor::{monitor_once, monitor_watch, record_hook_result};
 use crate::paths::AppPaths;
 use crate::registry::{
     normalize_existing_dir, print_file, read_enablements, read_sources, source_key, source_record,
@@ -42,6 +43,9 @@ pub fn run(args: &[String]) -> Result<i32, String> {
         }
         [cmd] if cmd == "sessions" => sessions(),
         [cmd] if cmd == "status" => status(),
+        [cmd] if cmd == "monitor" => monitor_once(),
+        [cmd, flag] if cmd == "monitor" && flag == "--watch" => monitor_watch(),
+        [cmd] if cmd == "top" => monitor_watch(),
         [cmd] if cmd == "graph" => graph(10),
         [cmd, flag, n] if cmd == "graph" && flag == "--top" => {
             let limit = n
@@ -64,6 +68,9 @@ pub fn run(args: &[String]) -> Result<i32, String> {
                 return Err(format!("--block-threshold expects 0-100, got {threshold}"));
             }
             dispatch_hook(sub, HookOutputMode::BlockAbove(threshold))
+        }
+        [cmd, sub, flag, prompt] if cmd == "hook" && flag == "--prompt" => {
+            dispatch_hook_prompt(sub, prompt, HookOutputMode::PlainText)
         }
         _ => {
             print_help();
@@ -88,6 +95,9 @@ Usage:
   tw init <agent>                    # codex | claude-code
   tw status
   tw sessions
+  tw monitor                         # hook/session dashboard
+  tw monitor --watch                 # refresh in the terminal
+  tw top                             # alias for monitor --watch
   tw graph [--top N]                 # mermaid flowchart of workspace + related sessions
   tw probe <agent> <prompt>          # simulate the hook decision for a prompt
   tw handoff
@@ -96,9 +106,11 @@ Usage:
 Hook commands:
   tw hook codex-user-prompt-submit
   tw hook codex-user-prompt-submit --block-threshold N
+  tw hook codex-user-prompt-submit --prompt 'manual test prompt'
   tw hook codex-stop
   tw hook claude-code-user-prompt-submit
   tw hook claude-code-user-prompt-submit --block-threshold N
+  tw hook claude-code-user-prompt-submit --prompt 'manual test prompt'
   tw hook claude-code-stop
 "
     );
@@ -114,6 +126,7 @@ fn doctor() -> Result<i32, String> {
     println!("Threadwise doctor");
     println!("config_dir: {}", paths.config_dir.display());
     println!("data_dir: {}", paths.data_dir.display());
+    println!("monitor_dir: {}", paths.monitor_dir.display());
     println!("sources_file: {}", paths.sources_file.display());
     println!("adapters_file: {}", paths.adapters_file.display());
     println!();
@@ -267,8 +280,9 @@ fn sessions() -> Result<i32, String> {
         println!("transcripts: {}", source.transcripts.len());
         for transcript in source.transcripts.iter().take(10) {
             println!(
-                "- {} relation={} score={} size={} modified={} events={} parse_errors={} user={} agent={} tasks={}/{} cwd={} id={} version={}",
+                "- {} title={} relation={} score={} size={} modified={} events={} parse_errors={} user={} agent={} tasks={}/{} cwd={} id={} version={}",
                 transcript.display_path,
+                transcript_title(transcript),
                 transcript.relation.as_str(),
                 transcript.score,
                 transcript.bytes,
@@ -318,7 +332,8 @@ fn status() -> Result<i32, String> {
     );
     if let Some((source, transcript)) = related.first() {
         println!(
-            "top_related: agent={} relation={} score={} modified={} cwd={} id={} path={}",
+            "top_related: title={} agent={} relation={} score={} modified={} cwd={} id={} path={}",
+            transcript_title(transcript),
             source.agent,
             transcript.relation.as_str(),
             transcript.score,
@@ -530,6 +545,7 @@ fn explain() -> Result<i32, String> {
 
     println!();
     println!("top_related:");
+    println!("  title: {}", transcript_title(transcript));
     println!("  agent: {}", source.agent);
     println!(
         "  session_id: {}",
@@ -618,8 +634,10 @@ fn graph(top: usize) -> Result<i32, String> {
             let id = format!("T{s_idx}_{t_idx}");
             let session = transcript.session_id.as_deref().unwrap_or("?");
             let short: String = session.chars().take(8).collect();
+            let title = transcript_title(transcript);
             println!(
-                "    {id}[\"{short}<br/>{relation}<br/>score={score} u={u} a={a}\"]",
+                "    {id}[\"{title}<br/>{short}<br/>{relation}<br/>score={score} u={u} a={a}\"]",
+                title = mermaid_escape(&title),
                 relation = transcript.relation.as_str(),
                 score = transcript.score,
                 u = transcript.user_messages,
@@ -637,6 +655,16 @@ fn graph(top: usize) -> Result<i32, String> {
     }
 
     Ok(0)
+}
+
+fn transcript_title(transcript: &crate::session_index::IndexedTranscript) -> String {
+    transcript
+        .title
+        .as_deref()
+        .filter(|title| !title.trim().is_empty())
+        .or(transcript.session_id.as_deref())
+        .unwrap_or(&transcript.display_path)
+        .to_string()
 }
 
 fn mermaid_escape(text: &str) -> String {
@@ -660,15 +688,38 @@ fn dispatch_hook(sub: &str, output_mode: HookOutputMode) -> Result<i32, String> 
             "stop" => HookKind::Stop,
             _ => continue,
         };
-        let _ = run_hook(kind, hook_kind, output_mode);
+        let event = read_hook_event(kind, hook_kind)?;
+        let _ = run_hook_event(event, output_mode);
         return Ok(0);
     }
     print_help();
     Ok(2)
 }
 
-fn run_hook(agent: &str, kind: HookKind, output_mode: HookOutputMode) -> Result<i32, String> {
-    let event = read_hook_event(agent, kind)?;
+fn dispatch_hook_prompt(
+    sub: &str,
+    prompt: &str,
+    output_mode: HookOutputMode,
+) -> Result<i32, String> {
+    for adapter in available_adapters() {
+        let kind = adapter.kind();
+        let Some(event) = sub.strip_prefix(kind).and_then(|s| s.strip_prefix('-')) else {
+            continue;
+        };
+        let hook_kind = match event {
+            "user-prompt-submit" => HookKind::UserPromptSubmit,
+            "stop" => HookKind::Stop,
+            _ => continue,
+        };
+        let event = hook_event_from_prompt(kind, hook_kind, prompt)?;
+        let _ = run_hook_event(event, output_mode);
+        return Ok(0);
+    }
+    print_help();
+    Ok(2)
+}
+
+fn run_hook_event(event: HookEvent, output_mode: HookOutputMode) -> Result<i32, String> {
     let paths = AppPaths::resolve()?;
     let sources = read_sources(&paths)?;
     let enablements = read_enablements(&paths)?;
@@ -679,15 +730,19 @@ fn run_hook(agent: &str, kind: HookKind, output_mode: HookOutputMode) -> Result<
                 || enablements.is_enabled(&source.path.display().to_string()))
     });
     if !enabled {
+        let _ = record_hook_result(&paths, &event, false, None);
         return Ok(0);
     }
 
-    if kind == HookKind::Stop {
+    if event.kind == HookKind::Stop {
+        let _ = record_hook_result(&paths, &event, true, None);
         return Ok(0);
     }
 
     let index = build_session_index(&sources, &enablements, &event.cwd)?;
-    if let Some(recommendation) = recommend_for_hook(&index, &event) {
+    let recommendation = recommend_for_hook(&index, &event);
+    let _ = record_hook_result(&paths, &event, true, recommendation.as_ref());
+    if let Some(recommendation) = recommendation {
         match output_mode {
             HookOutputMode::PlainText => println!("{}", recommendation.render()),
             HookOutputMode::BlockAbove(threshold) if recommendation.confidence >= threshold => {

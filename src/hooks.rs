@@ -17,6 +17,22 @@ pub struct HookEvent {
     pub session_id: Option<String>,
 }
 
+pub fn hook_event_from_prompt(
+    agent: &str,
+    kind: HookKind,
+    prompt: &str,
+) -> Result<HookEvent, String> {
+    Ok(HookEvent {
+        agent: agent.to_string(),
+        kind,
+        cwd: std::env::current_dir().map_err(|err| format!("failed to read cwd: {err}"))?,
+        prompt: Some(prompt.to_string()),
+        session_id: std::env::var("TW_SESSION_ID")
+            .ok()
+            .or_else(|| std::env::var("CODEX_SESSION_ID").ok()),
+    })
+}
+
 pub fn read_hook_event(agent: &str, kind: HookKind) -> Result<HookEvent, String> {
     let mut input = String::new();
     io::stdin()

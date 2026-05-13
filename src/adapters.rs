@@ -65,20 +65,47 @@ impl AgentAdapter for CodexAdapter {
 
     fn init_instructions(&self) -> String {
         "\
-Add Threadwise to ~/.codex/config.toml (note the double brackets:
-codex parses each hook list as an array of tables):
+Enable hooks in ~/.codex/config.toml:
 
-[[hooks.UserPromptSubmit]]
-command = \"tw hook codex-user-prompt-submit\"
+[features]
+hooks = true
 
-[[hooks.Stop]]
-command = \"tw hook codex-stop\"
+Add Threadwise to ~/.codex/hooks.json:
+
+{
+  \"hooks\": {
+    \"UserPromptSubmit\": [
+      {
+        \"matcher\": \"*\",
+        \"hooks\": [
+          {
+            \"type\": \"command\",
+            \"command\": \"tw hook codex-user-prompt-submit\",
+            \"timeout\": 30,
+            \"statusMessage\": \"Checking Threadwise sessions\"
+          }
+        ]
+      }
+    ],
+    \"Stop\": [
+      {
+        \"matcher\": \"*\",
+        \"hooks\": [
+          {
+            \"type\": \"command\",
+            \"command\": \"tw hook codex-stop\",
+            \"timeout\": 30,
+            \"statusMessage\": \"Recording Threadwise stop event\"
+          }
+        ]
+      }
+    ]
+  }
+}
 
 To stop the prompt before it reaches the model whenever Threadwise has
-advice at or above a confidence threshold, use:
-
-[[hooks.UserPromptSubmit]]
-command = \"tw hook codex-user-prompt-submit --block-threshold 30\"
+advice at or above a confidence threshold, change the UserPromptSubmit
+command to \"tw hook codex-user-prompt-submit --block-threshold 30\".
 
 Run `tw connect codex` after updating hook configuration.
 "

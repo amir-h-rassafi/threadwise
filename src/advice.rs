@@ -5,6 +5,11 @@ use crate::vector::{InMemoryVectorIndex, VectorIndex, embed_text};
 
 pub const SUMMARY_EMBEDDING_DIM: usize = 256;
 pub const SOFT_RESUME_THRESHOLD: f32 = 0.10;
+const SOFT_RESUME_MIN_INFORMATIVE_WORDS: usize = 3;
+const SOFT_RESUME_STOP_WORDS: &[&str] = &[
+    "a", "an", "and", "are", "as", "for", "how", "i", "in", "is", "it", "of", "on", "or", "the",
+    "this", "to", "we", "what", "with", "you",
+];
 
 pub enum RecommendationAction {
     ResumeExisting,
@@ -157,6 +162,9 @@ fn soft_resume(index: &SessionIndex, event: &HookEvent) -> Option<Recommendation
     if prompt.is_empty() {
         return None;
     }
+    if !soft_resume_prompt_has_signal(prompt) {
+        return None;
+    }
     let related = index.related_transcripts();
     if related.is_empty() {
         return None;
@@ -183,6 +191,26 @@ fn soft_resume(index: &SessionIndex, event: &HookEvent) -> Option<Recommendation
         handoff: None,
         resume_hint: resume_hint_for(&source.agent, session_id),
     })
+}
+
+fn soft_resume_prompt_has_signal(prompt: &str) -> bool {
+    let mut words = 0;
+    for token in prompt.split(|ch: char| !ch.is_ascii_alphanumeric()) {
+        if token.len() <= 1 {
+            continue;
+        }
+
+        let token = token.to_ascii_lowercase();
+        if SOFT_RESUME_STOP_WORDS.contains(&token.as_str()) {
+            continue;
+        }
+
+        words += 1;
+        if words >= SOFT_RESUME_MIN_INFORMATIVE_WORDS {
+            return true;
+        }
+    }
+    false
 }
 
 pub fn pick_best_match<'a>(
@@ -223,7 +251,9 @@ fn contains_any(text: &str, needles: &[&str]) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{PromptIntent, RecommendationAction, pick_best_match};
+    use super::{
+        PromptIntent, RecommendationAction, pick_best_match, soft_resume_prompt_has_signal,
+    };
     use crate::session_index::{IndexedSource, IndexedTranscript, WorkspaceRelation};
     use std::path::PathBuf;
 
@@ -256,6 +286,16 @@ mod tests {
         let advice = super::open_new_agent("review tests");
         assert!(matches!(advice.action, RecommendationAction::OpenNewAgent));
         assert!(advice.render().contains("Recommendation: open a new agent"));
+    }
+
+    #[test]
+    fn soft_resume_requires_informative_prompt_signal() {
+        assert!(!soft_resume_prompt_has_signal("weather"));
+        assert!(!soft_resume_prompt_has_signal("continue"));
+        assert!(!soft_resume_prompt_has_signal("weather in london"));
+        assert!(soft_resume_prompt_has_signal(
+            "update parser tests after hook changes"
+        ));
     }
 
     #[test]
@@ -306,6 +346,7 @@ mod tests {
             bytes: 0,
             modified: 0,
             session_id: Some(session_id.to_string()),
+            title: Some(summary.to_string()),
             cwd: None,
             cli_version: None,
             events: 0,

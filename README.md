@@ -101,23 +101,29 @@ tw enable claude-code                                  # opt in to advice for cl
 tw init codex                                          # print Codex hook config (config.toml)
 tw init claude-code                                    # print Claude Code hook config (settings.json)
 tw status                                              # current + related sessions
+tw monitor                                             # last hook + response + top related session
+tw top                                                 # live terminal monitor, like top
+tw hook codex-user-prompt-submit --prompt "manual test" # shell test for monitor
 ```
 
 `tw connect <agent>` registers the default source path for you
 (`~/.codex/sessions` or `~/.claude/projects`). For a non-default location use
 `tw source add local <path> --agent <kind>`. Paste the hook snippet from
 `tw init <agent>` into the agent's config. Hooks stay silent unless confidence
-is high and hard-time-out under 2 s.
+is high and hard-time-out under 2 s. Hook decisions are recorded locally under
+`~/.local/share/threadwise/monitor/` by default so `tw monitor` can show what
+the running session actually sent and how Threadwise answered.
 
 ## Status
 
 Working today: Codex + Claude Code adapters, opt-in enablement, transcript
 discovery + parsing, workspace-relation + cosine-similarity ranking,
 `UserPromptSubmit` hooks that suggest *resume* or *new agent* on explicit
-phrasing and stay silent otherwise. 16 unit + 5 e2e tests.
+phrasing and stay silent otherwise, and `tw monitor` / `tw top` for hook
+observability. 16 unit + 7 e2e tests.
 
 Not yet: persistent SQLite store, `fastembed-rs` embeddings, LanceDB,
-`tw handoff` / `tw explain` command bodies.
+`tw handoff` command body.
 
 Roadmap: [`docs/mvp-plan.md`](docs/mvp-plan.md). Module layout and data flow:
 [`docs/architecture.md`](docs/architecture.md). How matching actually

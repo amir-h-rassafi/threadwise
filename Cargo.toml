@@ -1,6 +1,6 @@
 [package]
 name = "threadwise"
-version = "0.1.5"
+version = "1.6.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 description = "Local session advisor for CLI coding agents"

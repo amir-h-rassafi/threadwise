@@ -156,7 +156,7 @@ A realistic cosine you'll see on this matcher:
 | ------------ | ------------------------------------------------------------------------------------------------------------------------------ |
 | Split        | Return `OpenNewAgent` with confidence 90, handoff = the prompt verbatim.                                                       |
 | Resume       | Among workspace-related candidates, pick the highest cosine. Return `ResumeExisting` with confidence 85.                       |
-| None         | Same picker. If cosine ≥ `SOFT_RESUME_THRESHOLD` (0.10), return `ResumeExisting` with confidence 70. Otherwise silent.         |
+| None         | Same picker only after the prompt has at least 3 informative words. If cosine ≥ `SOFT_RESUME_THRESHOLD` (0.10), return `ResumeExisting` with confidence 70. Otherwise silent. |
 
 Constants live in `src/advice.rs` and `src/transcripts.rs` — see the
 table below. Tuning these is the easy way to make the matcher more or
@@ -169,6 +169,7 @@ less talkative.
 | `SUMMARY_TEXT_CAP`              | src/transcripts.rs    | 16384 | Max chars captured per session into summary  |
 | `SUMMARY_EMBEDDING_DIM`         | src/advice.rs         | 256   | FNV bucket count                             |
 | `SOFT_RESUME_THRESHOLD`         | src/advice.rs         | 0.10  | Min cosine to fire without explicit phrasing |
+| `SOFT_RESUME_MIN_INFORMATIVE_WORDS` | src/advice.rs     | 3     | Min non-stopword tokens for implicit resume  |
 | `MAX_PARENT_WORKSPACE_DISTANCE` | src/session_index.rs  | 1     | How many dirs up still counts as Parent      |
 
 ## Why your "weather" session may not be matching
@@ -193,15 +194,27 @@ Check in order:
 ```sh
 tw status              # workspace, source count, top related summary
 tw sessions            # every per-transcript metric, flat text
+tw monitor             # last hook payload, response, and top related session
+tw top                 # live shell monitor; stop with Ctrl-C
 tw explain             # scoring breakdown for the top related session
 tw graph --top 10      # mermaid flowchart, paste into mermaid.live
 tw probe codex "your exact prompt"
 tw probe claude-code "your exact prompt"
+tw hook codex-user-prompt-submit --prompt "your exact prompt"
 ```
 
 `tw probe` is the single most useful debug surface: it shows enablement
 state, intent classification, per-candidate similarity, the threshold,
 and the final decision with reason.
+
+`tw monitor` is the single most useful runtime surface: it reads
+`~/.local/share/threadwise/monitor/hook-events.jsonl` by default and shows
+the hook's observed session id, prompt preview, decision, confidence, selected
+session, and the current top related transcript.
+
+For a quick manual shell test, use `tw hook ... --prompt "..."`. Running
+`tw hook ...` without `--prompt` is the real agent hook path: it waits for the
+agent to send JSON on stdin and finishes only after stdin closes.
 
 ## What's planned
 
