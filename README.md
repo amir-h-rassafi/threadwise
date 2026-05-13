@@ -28,12 +28,13 @@ Three answers, picked from local evidence:
 - **Continue current session** — quiet, no output.
 - **Resume related session** — points at the prior session whose summary
   best matches what you're about to ask, ranked by workspace relation +
-  cosine similarity.
+  cosine similarity over captured message text.
 - **Open new agent** — emits a copy-ready handoff prompt for a fresh focused
   agent when the prompt explicitly asks to split.
 
-Codex first. The adapter layer is built to accept more agents once Codex is
-solid.
+Adapters today: **Codex** (`~/.codex/sessions/`) and **Claude Code**
+(`~/.claude/projects/`). The adapter boundary is the agent-specific wiring
+layer; the core ranking is agent-neutral.
 
 ## Installation
 
@@ -94,20 +95,31 @@ will follow once we settle on one.
 ```sh
 tw doctor                                              # check setup
 tw connect codex                                       # detect Codex install
-tw source add local ~/.codex/sessions --agent codex    # register transcripts
-tw enable codex                                        # opt in to advice
-tw init codex                                          # print hook config
+tw connect claude-code                                 # detect Claude Code install
+tw enable codex                                        # opt in to advice for codex
+tw enable claude-code                                  # opt in to advice for claude-code
+tw init codex                                          # print Codex hook config (config.toml)
+tw init claude-code                                    # print Claude Code hook config (settings.json)
 tw status                                              # current + related sessions
 ```
 
-Paste the hook lines from `tw init codex` into your Codex config. The hook
-runs on each prompt submit, stays silent unless confidence is high, and hard-
-times-out under 2 s.
+`tw connect <agent>` registers the default source path for you
+(`~/.codex/sessions` or `~/.claude/projects`). For a non-default location use
+`tw source add local <path> --agent <kind>`. Paste the hook snippet from
+`tw init <agent>` into the agent's config. Hooks stay silent unless confidence
+is high and hard-time-out under 2 s.
 
 ## Status
 
-MVP in progress. Roadmap and milestones:
-[`docs/mvp-plan.md`](docs/mvp-plan.md). Module layout and data flow:
+Working today: Codex + Claude Code adapters, opt-in enablement, transcript
+discovery + parsing, workspace-relation + cosine-similarity ranking,
+`UserPromptSubmit` hooks that suggest *resume* or *new agent* on explicit
+phrasing and stay silent otherwise. 16 unit + 5 e2e tests.
+
+Not yet: persistent SQLite store, `fastembed-rs` embeddings, LanceDB,
+`tw handoff` / `tw explain` command bodies.
+
+Roadmap: [`docs/mvp-plan.md`](docs/mvp-plan.md). Module layout and data flow:
 [`docs/architecture.md`](docs/architecture.md). Evaluation scoping:
 [`docs/benchmark-plan.md`](docs/benchmark-plan.md).
 

@@ -134,46 +134,48 @@ flowchart LR
     Advice --> User[User]
 ```
 
-MVP concrete mapping:
+Concrete mapping (today):
 
 ```mermaid
 flowchart LR
-    Codex[Codex CLI] --> Hooks[Codex Hooks]
-    Codex --> Logs[Codex Transcripts]
-    Hooks --> Core[Threadwise Core]
-    Logs --> Core
-    Core --> SQLite[(SQLite Metadata)]
-    Core --> LanceDB[(LanceDB Vectors)]
-    Core --> Output[Short Advice or No-op]
+    Codex[Codex CLI] -->|hook stdin| Hook[tw hook]
+    Claude[Claude Code CLI] -->|hook stdin| Hook
+    Codex -->|JSONL| CodexLogs[~/.codex/sessions]
+    Claude -->|JSONL| ClaudeLogs[~/.claude/projects]
+
+    Hook --> App[app dispatch]
+    CodexLogs --> Transcripts[transcripts parser]
+    ClaudeLogs --> Transcripts
+
+    App --> Registry[registry: sources / enablements TSV]
+    Transcripts --> Index[session_index]
+    Registry --> Index
+
+    Index --> Vector[vector: cosine + FNV bag-of-words]
+    Index --> Advice[advice]
+    Vector --> Advice
+    Advice --> Out[short recommendation or silent exit]
 ```
 
-Core responsibilities:
+Modules in `src/`:
 
-- Normalize hook input and transcript turns.
-- Maintain the agent registry and capability map.
-- Track active session objective, touched files, commands, and open questions.
-- Search recent sessions inside the TTL window using content, vectors, and
-  project metadata.
-- Score `continue_current`, `resume_existing`, and `open_new_agent`.
-- Generate a handoff prompt when a split is recommended.
+| Module           | Responsibility                                                            |
+| ---------------- | ------------------------------------------------------------------------- |
+| `adapters`       | Agent detection (Codex, Claude Code). Version, paths, capabilities.       |
+| `paths`          | XDG-aware config/data dirs, default agent paths.                          |
+| `registry`       | TSV-backed sources / adapters / enablements with safe upsert.             |
+| `transcripts`    | JSONL parser per agent kind. Captures message text into a summary buffer. |
+| `session_index`  | Agent-neutral read model. Workspace relation + activity score.            |
+| `vector`         | `VectorIndex` trait + in-memory cosine. Deterministic `embed_text`.       |
+| `advice`         | Prompt intent detection + similarity-ranked resume pick.                  |
+| `hooks`          | Reads hook JSON from stdin. Agent-neutral fields.                         |
+| `app`            | CLI dispatch, hook routing, error swallowing on the hook path.            |
 
-Current core slice:
+Persistence today is intentionally minimal:
 
-- `session_index` is the agent-neutral read model for CLI status and session
-  listing.
-- It reads registered sources, parses transcripts, compares each session cwd to
-  the active workspace, and assigns a deterministic relation:
-  `same_workspace`, `nested_workspace`, `parent_workspace`,
-  `different_workspace`, or `unknown_workspace`.
-- It scores related sessions from workspace relation plus lightweight activity
-  signals. Agent kind and version remain metadata only.
-- `hooks` parses Codex hook JSON from stdin with flexible field names for cwd,
-  prompt, session id, transcript path, pid, and parent pid.
-- `advice` consumes the session index for conservative metadata-only hook
-  recommendations. Disabled hooks, invalid payloads, and normal prompts stay
-  silent.
-- The next layers should add persisted hook events, handoff history, FTS,
-  embeddings, and LanceDB-backed lookup.
+- `sources.tsv`, `adapters.tsv`, `enablements.tsv` under `$XDG_CONFIG_HOME/threadwise/`.
+- No SQLite, no LanceDB yet. The session index is rebuilt per invocation;
+  caching lands when M3's persistent index goes in.
 
 Adapter responsibilities:
 
@@ -325,6 +327,11 @@ Hook commands:
 
 - `tw hook codex-user-prompt-submit`
 - `tw hook codex-stop`
+- `tw hook claude-code-user-prompt-submit`
+- `tw hook claude-code-stop`
+
+`tw hook` dispatch matches the agent kind prefix against every registered
+adapter, so new adapters get hook routes automatically.
 
 ## Build Plan
 
@@ -353,14 +360,15 @@ Hook commands:
 
 ## Later
 
-After the Codex MVP works:
+Done since the original plan: Claude Code adapter.
 
-- Claude Code adapter.
+Still ahead:
+
 - OpenCode adapter.
 - VS Code / Copilot extension or hook-file integration.
 - Cursor plugin or extension integration.
 - MCP surface so agents can ask Threadwise for advice.
-- Larger or user-selectable embedding models.
+- Larger or user-selectable embedding models (swap `embed_text` for `fastembed-rs`).
 
 ## Relevant References
 
