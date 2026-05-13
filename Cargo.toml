@@ -5,6 +5,9 @@ edition = "2024"
 license = "MIT OR Apache-2.0"
 description = "Local session advisor for CLI coding agents"
 
+[dependencies]
+serde_json = "1"
+
 [[bin]]
 name = "tw"
 path = "src/main.rs"

@@ -189,8 +189,9 @@ Done when:
 - Re-running ingestion is idempotent.
 
 Current implementation note: `tw sessions` now recursively discovers
-registered `.jsonl` and `.json` transcript files and reports the newest files
-per source. Turn parsing is the next step.
+registered `.jsonl` and `.json` transcript files, parses safe metadata, and
+reports session id, cwd, event count, and high-level user/agent message counts.
+Repo filtering and clustering are the next steps.
 
 ### M3: Summaries And Search
 
@@ -285,3 +286,9 @@ Mitigations:
 - Keep `VectorIndex` swappable.
 - Add `tw doctor` checks for model, DB, source, and hook state.
 - Default to no output unless confidence is high.
+
+## Backlog
+
+- Add structured logging with Rust `tracing` once hook execution, transcript
+  parsing, and advice generation need debug-level diagnostics. Keep normal CLI
+  output human-readable.
