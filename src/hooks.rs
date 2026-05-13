@@ -15,18 +15,6 @@ pub struct HookEvent {
     pub cwd: PathBuf,
     pub prompt: Option<String>,
     pub session_id: Option<String>,
-    pub transcript_path: Option<String>,
-    pub pid: Option<u64>,
-    pub parent_pid: Option<u64>,
-}
-
-impl HookKind {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::CodexUserPromptSubmit => "codex-user-prompt-submit",
-            Self::CodexStop => "codex-stop",
-        }
-    }
 }
 
 pub fn read_hook_event(agent: &str, kind: HookKind) -> Result<HookEvent, String> {
@@ -83,35 +71,6 @@ pub fn read_hook_event(agent: &str, kind: HookKind) -> Result<HookEvent, String>
                 &["metadata", "session_id"],
             ],
         ),
-        transcript_path: find_string(
-            value.as_ref(),
-            &[
-                &["transcript_path"],
-                &["transcriptPath"],
-                &["payload", "transcript_path"],
-                &["payload", "transcriptPath"],
-                &["metadata", "transcript_path"],
-            ],
-        ),
-        pid: find_u64(
-            value.as_ref(),
-            &[
-                &["pid"],
-                &["process_id"],
-                &["payload", "pid"],
-                &["metadata", "pid"],
-            ],
-        ),
-        parent_pid: find_u64(
-            value.as_ref(),
-            &[
-                &["parent_pid"],
-                &["ppid"],
-                &["payload", "parent_pid"],
-                &["payload", "ppid"],
-                &["metadata", "parent_pid"],
-            ],
-        ),
     })
 }
 
@@ -135,13 +94,6 @@ fn find_string(value: Option<&Value>, paths: &[&[&str]]) -> Option<String> {
         })
 }
 
-fn find_u64(value: Option<&Value>, paths: &[&[&str]]) -> Option<u64> {
-    paths
-        .iter()
-        .filter_map(|path| value_at(value?, path))
-        .find_map(Value::as_u64)
-}
-
 fn value_at<'a>(value: &'a Value, path: &[&str]) -> Option<&'a Value> {
     let mut current = value;
     for key in path {
@@ -152,7 +104,7 @@ fn value_at<'a>(value: &'a Value, path: &[&str]) -> Option<&'a Value> {
 
 #[cfg(test)]
 mod tests {
-    use super::{find_string, find_u64, parse_optional_json};
+    use super::{find_string, parse_optional_json};
     use serde_json::json;
 
     #[test]
@@ -160,8 +112,7 @@ mod tests {
         let value = json!({
             "payload": {
                 "cwd": "/repo",
-                "prompt": "split this out",
-                "pid": 42
+                "prompt": "split this out"
             }
         });
 
@@ -173,7 +124,6 @@ mod tests {
             find_string(Some(&value), &[&["payload", "prompt"]]).as_deref(),
             Some("split this out")
         );
-        assert_eq!(find_u64(Some(&value), &[&["payload", "pid"]]), Some(42));
     }
 
     #[test]

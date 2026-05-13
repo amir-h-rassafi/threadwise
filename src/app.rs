@@ -320,17 +320,12 @@ fn status() -> Result<i32, String> {
 }
 
 fn hook_codex(kind: HookKind) -> Result<i32, String> {
-    run_hook("codex", kind)
+    let _ = run_hook("codex", kind);
+    Ok(0)
 }
 
 fn run_hook(agent: &str, kind: HookKind) -> Result<i32, String> {
     let event = read_hook_event(agent, kind)?;
-    let _metadata_seen = (
-        event.kind.as_str(),
-        event.transcript_path.as_deref(),
-        event.pid,
-        event.parent_pid,
-    );
     let paths = AppPaths::resolve()?;
     let sources = read_sources(&paths)?;
     let enablements = read_enablements(&paths)?;

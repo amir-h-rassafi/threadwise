@@ -47,7 +47,7 @@ pub fn discover_transcripts(root: &Path) -> Result<Vec<TranscriptFile>, String> 
     }
 
     visit_transcript_dir(root, &mut transcripts)?;
-    transcripts.sort_by(|left, right| right.modified.cmp(&left.modified));
+    transcripts.sort_by_key(|file| std::cmp::Reverse(file.modified));
     Ok(transcripts)
 }
 

@@ -97,7 +97,7 @@ pub fn upsert_line(path: &Path, key: &str, line: &str) -> Result<(), String> {
     if path.is_file() {
         let content = read_to_string(path)?;
         for existing in content.lines() {
-            if !existing.starts_with(key) {
+            if !line_matches_key(existing, key) {
                 lines.push(existing.to_string());
             }
         }
@@ -150,6 +150,13 @@ pub fn unix_timestamp() -> u64 {
         .unwrap_or(0)
 }
 
+fn line_matches_key(line: &str, key: &str) -> bool {
+    if !line.starts_with(key) {
+        return false;
+    }
+    line.len() == key.len() || line.as_bytes()[key.len()] == b'\t'
+}
+
 fn expand_tilde(path: &str) -> Result<PathBuf, String> {
     if path == "~" {
         return home_dir();
@@ -158,4 +165,42 @@ fn expand_tilde(path: &str) -> Result<PathBuf, String> {
         return Ok(home_dir()?.join(rest));
     }
     Ok(PathBuf::from(path))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{line_matches_key, upsert_line};
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn key_match_requires_tab_boundary() {
+        assert!(line_matches_key("codex\tenabled\t...", "codex"));
+        assert!(line_matches_key("codex", "codex"));
+        assert!(!line_matches_key("codex-extra\tenabled", "codex"));
+        assert!(!line_matches_key("codexx", "codex"));
+    }
+
+    #[test]
+    fn upsert_does_not_drop_keys_that_share_a_prefix() {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time")
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("tw-upsert-{}-{nonce}", std::process::id()));
+        fs::create_dir_all(&dir).expect("create temp dir");
+        let path = dir.join("table.tsv");
+
+        upsert_line(&path, "codex", "codex\tenabled\tmanual\t1").expect("write codex");
+        upsert_line(&path, "codex-extra", "codex-extra\tenabled\tmanual\t1")
+            .expect("write codex-extra");
+        upsert_line(&path, "codex", "codex\tdisabled\tmanual\t2").expect("rewrite codex");
+
+        let content = fs::read_to_string(&path).expect("read back");
+        assert!(content.contains("codex-extra\tenabled"));
+        assert!(content.contains("codex\tdisabled"));
+        assert!(!content.contains("codex\tenabled"));
+
+        let _ = fs::remove_dir_all(&dir);
+    }
 }
