@@ -71,8 +71,12 @@ impl TestEnv {
     }
 
     fn hook(&self, payload: &str) -> std::process::Output {
+        self.hook_with_args(&["hook", "codex-user-prompt-submit"], payload)
+    }
+
+    fn hook_with_args(&self, args: &[&str], payload: &str) -> std::process::Output {
         let mut child = self
-            .tw(&["hook", "codex-user-prompt-submit"])
+            .tw(args)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -172,6 +176,41 @@ fn enabled_hook_can_suggest_related_resume_for_explicit_resume() {
     let stdout = stdout(&output);
     assert!(stdout.contains("Recommendation: resume existing session"));
     assert!(stdout.contains("Session: old-session"));
+}
+
+#[test]
+fn hook_block_threshold_blocks_high_confidence_recommendation() {
+    let env = TestEnv::new("blocking-hook");
+    env.source_add();
+    env.enable_codex();
+
+    let output = env.hook_with_args(
+        &[
+            "hook",
+            "codex-user-prompt-submit",
+            "--block-threshold",
+            "30",
+        ],
+        &hook_payload(
+            &env.workspace,
+            "resume previous session for this repo",
+            "fresh-session",
+        ),
+    );
+
+    assert_success(&output, "blocking hook");
+    let value: serde_json::Value = serde_json::from_str(&stdout(&output)).expect("hook emits JSON");
+    assert_eq!(
+        value.get("decision").and_then(|v| v.as_str()),
+        Some("block")
+    );
+    assert!(
+        value
+            .get("reason")
+            .and_then(|v| v.as_str())
+            .expect("reason")
+            .contains("Recommendation: resume existing session")
+    );
 }
 
 fn write_codex_transcript(sessions: &Path, workspace: &Path) {

@@ -55,7 +55,16 @@ pub fn run(args: &[String]) -> Result<i32, String> {
             planned(cmd);
             Ok(2)
         }
-        [cmd, sub] if cmd == "hook" => dispatch_hook(sub),
+        [cmd, sub] if cmd == "hook" => dispatch_hook(sub, HookOutputMode::PlainText),
+        [cmd, sub, flag, threshold] if cmd == "hook" && flag == "--block-threshold" => {
+            let threshold = threshold
+                .parse::<u8>()
+                .map_err(|_| format!("--block-threshold expects 0-100, got {threshold}"))?;
+            if threshold > 100 {
+                return Err(format!("--block-threshold expects 0-100, got {threshold}"));
+            }
+            dispatch_hook(sub, HookOutputMode::BlockAbove(threshold))
+        }
         _ => {
             print_help();
             Ok(2)
@@ -86,8 +95,10 @@ Usage:
 
 Hook commands:
   tw hook codex-user-prompt-submit
+  tw hook codex-user-prompt-submit --block-threshold N
   tw hook codex-stop
   tw hook claude-code-user-prompt-submit
+  tw hook claude-code-user-prompt-submit --block-threshold N
   tw hook claude-code-stop
 "
     );
@@ -632,7 +643,13 @@ fn mermaid_escape(text: &str) -> String {
     text.replace('"', "&quot;")
 }
 
-fn dispatch_hook(sub: &str) -> Result<i32, String> {
+#[derive(Clone, Copy)]
+enum HookOutputMode {
+    PlainText,
+    BlockAbove(u8),
+}
+
+fn dispatch_hook(sub: &str, output_mode: HookOutputMode) -> Result<i32, String> {
     for adapter in available_adapters() {
         let kind = adapter.kind();
         let Some(event) = sub.strip_prefix(kind).and_then(|s| s.strip_prefix('-')) else {
@@ -643,14 +660,14 @@ fn dispatch_hook(sub: &str) -> Result<i32, String> {
             "stop" => HookKind::Stop,
             _ => continue,
         };
-        let _ = run_hook(kind, hook_kind);
+        let _ = run_hook(kind, hook_kind, output_mode);
         return Ok(0);
     }
     print_help();
     Ok(2)
 }
 
-fn run_hook(agent: &str, kind: HookKind) -> Result<i32, String> {
+fn run_hook(agent: &str, kind: HookKind, output_mode: HookOutputMode) -> Result<i32, String> {
     let event = read_hook_event(agent, kind)?;
     let paths = AppPaths::resolve()?;
     let sources = read_sources(&paths)?;
@@ -671,8 +688,32 @@ fn run_hook(agent: &str, kind: HookKind) -> Result<i32, String> {
 
     let index = build_session_index(&sources, &enablements, &event.cwd)?;
     if let Some(recommendation) = recommend_for_hook(&index, &event) {
-        println!("{}", recommendation.render());
+        match output_mode {
+            HookOutputMode::PlainText => println!("{}", recommendation.render()),
+            HookOutputMode::BlockAbove(threshold) if recommendation.confidence >= threshold => {
+                print_blocking_recommendation(&recommendation)?;
+            }
+            HookOutputMode::BlockAbove(_) => {}
+        }
     }
 
     Ok(0)
+}
+
+fn print_blocking_recommendation(
+    recommendation: &crate::advice::Recommendation,
+) -> Result<(), String> {
+    let output = serde_json::json!({
+        "decision": "block",
+        "reason": recommendation.render(),
+        "hookSpecificOutput": {
+            "hookEventName": "UserPromptSubmit",
+        }
+    });
+    println!(
+        "{}",
+        serde_json::to_string(&output)
+            .map_err(|err| format!("failed to render hook JSON: {err}"))?
+    );
+    Ok(())
 }

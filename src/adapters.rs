@@ -74,6 +74,12 @@ command = \"tw hook codex-user-prompt-submit\"
 [[hooks.Stop]]
 command = \"tw hook codex-stop\"
 
+To stop the prompt before it reaches the model whenever Threadwise has
+advice at or above a confidence threshold, use:
+
+[[hooks.UserPromptSubmit]]
+command = \"tw hook codex-user-prompt-submit --block-threshold 30\"
+
 Run `tw connect codex` after updating hook configuration.
 "
         .to_string()
@@ -122,7 +128,7 @@ impl AgentAdapter for ClaudeCodeAdapter {
 Add Threadwise to your Claude Code settings.json:
 
 {
-  \"hooks\": {
+    \"hooks\": {
     \"UserPromptSubmit\": [
       {\"hooks\": [{\"type\": \"command\", \"command\": \"tw hook claude-code-user-prompt-submit\"}]}
     ],
@@ -133,6 +139,7 @@ Add Threadwise to your Claude Code settings.json:
 }
 
 Settings file is typically at ~/.claude/settings.json.
+For blocking behavior, use command \"tw hook claude-code-user-prompt-submit --block-threshold 30\".
 Run `tw connect claude-code` after updating hooks.
 "
         .to_string()
