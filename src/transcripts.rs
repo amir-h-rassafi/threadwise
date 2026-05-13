@@ -41,7 +41,7 @@ pub struct TranscriptSummary {
     pub summary_text: String,
 }
 
-const SUMMARY_TEXT_CAP: usize = 4096;
+const SUMMARY_TEXT_CAP: usize = 16384;
 
 pub fn discover_transcripts(root: &Path) -> Result<Vec<TranscriptFile>, String> {
     let mut transcripts = Vec::new();
@@ -170,29 +170,33 @@ fn apply_claude_code_event(value: &Value, summary: &mut TranscriptSummary) {
     match event_type {
         "user" => {
             summary.user_messages += 1;
-            if let Some(content) = message
-                .and_then(|m| m.get("content"))
-                .and_then(Value::as_str)
-            {
-                append_text(content, &mut summary.summary_text);
+            if let Some(content) = message.and_then(|m| m.get("content")) {
+                append_claude_content(content, &mut summary.summary_text);
             }
         }
         "assistant" => {
             summary.agent_messages += 1;
-            if let Some(items) = message
-                .and_then(|m| m.get("content"))
-                .and_then(Value::as_array)
-            {
-                for item in items {
-                    if item.get("type").and_then(Value::as_str) == Some("text")
-                        && let Some(text) = item.get("text").and_then(Value::as_str)
-                    {
-                        append_text(text, &mut summary.summary_text);
-                    }
-                }
+            if let Some(content) = message.and_then(|m| m.get("content")) {
+                append_claude_content(content, &mut summary.summary_text);
             }
         }
         _ => {}
+    }
+}
+
+fn append_claude_content(content: &Value, summary_text: &mut String) {
+    if let Some(text) = content.as_str() {
+        append_text(text, summary_text);
+        return;
+    }
+    if let Some(items) = content.as_array() {
+        for item in items {
+            if item.get("type").and_then(Value::as_str) == Some("text")
+                && let Some(text) = item.get("text").and_then(Value::as_str)
+            {
+                append_text(text, summary_text);
+            }
+        }
     }
 }
 

@@ -3,7 +3,8 @@ use std::fs;
 
 use crate::adapters::{adapter_for_kind, available_adapters, print_agent_detection};
 use crate::advice::{
-    RecommendationAction, SUMMARY_EMBEDDING_DIM, pick_best_match, recommend_for_hook,
+    RecommendationAction, SOFT_RESUME_THRESHOLD, SUMMARY_EMBEDDING_DIM, pick_best_match,
+    recommend_for_hook,
 };
 use crate::hooks::{HookEvent, HookKind, read_hook_event};
 use crate::paths::AppPaths;
@@ -436,9 +437,10 @@ fn probe(agent: &str, prompt: &str) -> Result<i32, String> {
     }
     if let Some((_, t, score)) = pick_best_match(&related, prompt) {
         println!(
-            "  best_match: id={} similarity={:.2} threshold=0.15 (soft-resume fires above threshold)",
+            "  best_match: id={} similarity={:.2} threshold={:.2} (soft-resume fires above threshold)",
             t.session_id.as_deref().unwrap_or("?"),
             score,
+            SOFT_RESUME_THRESHOLD,
         );
     }
 

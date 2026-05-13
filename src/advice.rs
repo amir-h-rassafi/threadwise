@@ -3,7 +3,7 @@ use crate::session_index::{IndexedSource, IndexedTranscript, SessionIndex};
 use crate::vector::{InMemoryVectorIndex, VectorIndex, embed_text};
 
 pub const SUMMARY_EMBEDDING_DIM: usize = 256;
-const SOFT_RESUME_THRESHOLD: f32 = 0.15;
+pub const SOFT_RESUME_THRESHOLD: f32 = 0.10;
 
 pub enum RecommendationAction {
     ResumeExisting,

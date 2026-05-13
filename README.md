@@ -120,7 +120,9 @@ Not yet: persistent SQLite store, `fastembed-rs` embeddings, LanceDB,
 `tw handoff` / `tw explain` command bodies.
 
 Roadmap: [`docs/mvp-plan.md`](docs/mvp-plan.md). Module layout and data flow:
-[`docs/architecture.md`](docs/architecture.md). Evaluation scoping:
+[`docs/architecture.md`](docs/architecture.md). How matching actually
+works (vector shape, thresholds, why a topic might miss):
+[`docs/matching.md`](docs/matching.md). Evaluation scoping:
 [`docs/benchmark-plan.md`](docs/benchmark-plan.md).
 
 ## Development
