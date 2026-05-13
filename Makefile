@@ -20,8 +20,8 @@ help:
 	@echo "  check            fmt-check + lint + test"
 	@echo "  ci               build + check (mirrors GitHub Actions)"
 	@echo ""
-	@echo "  install          copy target/release/tw to PREFIX/bin (default /usr/local/bin)"
-	@echo "                   run 'make build-release' first; use 'sudo make install' for /usr/local"
+	@echo "  install          build (as invoking user even under sudo) and copy to PREFIX/bin"
+	@echo "                   (default /usr/local/bin; 'sudo make install' is the typical form)"
 	@echo "  uninstall        rm PREFIX/bin/tw"
 	@echo "  install-cargo    cargo install --path . --locked -> CARGO_HOME/bin"
 	@echo "  uninstall-cargo  cargo uninstall threadwise"
@@ -43,14 +43,28 @@ build-release:
 	cargo build --release --locked
 
 install:
-	@if [ ! -x target/release/tw ]; then \
-	  echo "error: target/release/tw not found."; \
-	  echo "build first as your user: make build-release"; \
-	  exit 1; \
+	@if [ "$$(id -u)" = "0" ] && [ -n "$$SUDO_USER" ]; then \
+	  echo "threadwise: dropping privileges to $$SUDO_USER for cargo build"; \
+	  sudo -u "$$SUDO_USER" -i $(MAKE) -C "$(CURDIR)" build-release; \
+	else \
+	  $(MAKE) build-release; \
 	fi
+	@expected=$$(grep '^version' Cargo.toml | sed -E 's/.*"(.+)".*/\1/'); \
+	 actual=$$(target/release/tw --version 2>/dev/null | awk '{print $$2}'); \
+	 if [ "$$expected" != "$$actual" ]; then \
+	   echo "error: target/release/tw is stale (built $$actual, Cargo.toml at $$expected)"; \
+	   echo "run: cargo clean && make install"; \
+	   exit 1; \
+	 fi
 	$(INSTALL) -d "$(DESTDIR)$(BINDIR)"
 	$(INSTALL) -m 0755 target/release/tw "$(DESTDIR)$(BINDIR)/tw"
-	@echo "installed $(DESTDIR)$(BINDIR)/tw"
+	@echo "installed $(DESTDIR)$(BINDIR)/tw (version $$(target/release/tw --version | awk '{print $$2}'))"
+	@if [ -x "$$HOME/.cargo/bin/tw" ]; then \
+	  echo ""; \
+	  echo "note: $$HOME/.cargo/bin/tw still exists from a previous 'make install-cargo'."; \
+	  echo "      if it appears first on PATH, 'tw --version' will resolve to it instead."; \
+	  echo "      remove with: cargo uninstall threadwise"; \
+	fi
 
 uninstall:
 	rm -f "$(DESTDIR)$(BINDIR)/tw"
