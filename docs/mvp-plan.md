@@ -3,8 +3,8 @@
 ## Goal
 
 Ship a local Codex-first advisor that can be installed as a single CLI, wired
-into an existing Codex setup, index recent sessions, and suggest one of three
-actions:
+into an explicitly enabled Codex setup, index recent sessions, cluster session
+evidence, and suggest one of three actions:
 
 - Continue in the current session.
 - Resume a related session.
@@ -29,10 +29,12 @@ normal Codex usage.
   transcript path, and supported capabilities.
 - `tw source add local <path> --agent codex` can register an explicit
   session source.
+- `tw enable codex` can opt Codex into advice.
+- `tw disable codex` can turn advice off without deleting metadata.
 - `tw status` can show the current session and related sessions for
   the active repo.
 - `tw hook codex-user-prompt-submit` usually returns no output, but
-  returns short advice when confidence is high.
+  returns short advice when the event is enabled and confidence is high.
 - `tw handoff` can print a copy-ready prompt for a new focused agent.
 - Hook execution targets under 500 ms and hard-times-out under 2 seconds.
 - Everything works offline after the local embedding model is present.
@@ -65,6 +67,7 @@ Setup commands:
 tw init codex
 tw connect codex
 tw source add local ~/.codex/sessions --agent codex
+tw enable codex
 tw doctor
 ```
 
@@ -92,6 +95,9 @@ SQLite tables:
 - `agents`: agent kind, agent version, adapter version, executable path,
   capabilities, first seen, last seen.
 - `sources`: agent id, source kind, path, enabled, last scan.
+- `enablements`: scope kind, scope id, enabled, reason, timestamps.
+- `hook_events`: agent id, session id, event type, pid, parent pid, cwd,
+  prompt hash, transcript hint, timestamp.
 - `sessions`: agent id, source id, session id, repo root, title, status,
   timestamps.
 - `turns`: session id, role, content, files mentioned, commands mentioned,
@@ -108,6 +114,30 @@ LanceDB table:
 
 Agent versions are compatibility and debug metadata. Lookup should rank by
 content similarity, repo, recency, files, commands, and task state.
+
+## Enablement
+
+Threadwise is opt-in. Detection and source registration do not enable advice.
+
+- `connect` records what exists.
+- `source add local` records where transcripts live.
+- `enable` turns advice on for an agent or source.
+- `disable` turns advice off while preserving metadata.
+- Hook commands no-op unless the event belongs to enabled scope.
+
+## Clustering Inputs
+
+Use available metadata to connect hook events to real sessions:
+
+- Agent kind and session id.
+- Repo root and current working directory.
+- Transcript path and last modified time.
+- Process metadata where available: pid, parent pid, executable path, start
+  time.
+- Hook event metadata: event type, timestamp, cwd, prompt hash, transcript hint.
+- Touched files and commands.
+- Summary and vector similarity.
+- Recency and TTL window.
 
 ## Milestones
 
@@ -134,6 +164,7 @@ Deliver:
 - Detect Codex executable path and version.
 - Detect config path and likely transcript path.
 - Persist agent and source metadata.
+- `tw enable codex` and `tw disable codex`.
 - `tw adapters`.
 
 Done when:
@@ -147,7 +178,9 @@ Deliver:
 
 - Read recent Codex transcripts from registered sources.
 - Normalize turns into the internal event schema.
-- Extract repo root, files mentioned, commands mentioned, and timestamps.
+- Extract repo root, files mentioned, commands mentioned, timestamps, and
+  session hints.
+- Capture hook event metadata when hooks run.
 - Persist sessions and turns in SQLite.
 
 Done when:
@@ -163,7 +196,9 @@ Deliver:
 - Add SQLite FTS/BM25 over summary and turn text.
 - Add `fastembed-rs` embeddings.
 - Add LanceDB-backed `VectorIndex`.
-- Hybrid scoring with content, repo, recency, files, and commands.
+- Cluster sessions with content, repo, recency, files, commands, process
+  metadata, and hook metadata.
+- Hybrid scoring over clustered candidates.
 
 Done when:
 
@@ -192,12 +227,14 @@ Deliver:
 - `tw init codex`.
 - `tw hook codex-user-prompt-submit`.
 - `tw hook codex-stop`.
+- Enablement checks before any advice is emitted.
 - Timeout enforcement.
 - No-op fallback on internal errors.
 
 Done when:
 
 - Hook can be wired into Codex without changing normal Codex usage.
+- Hook is silent for disabled agents and sources.
 - Pre-prompt hook returns within the timeout budget.
 
 ### M6: Packaging
@@ -222,10 +259,12 @@ Build the smallest useful vertical path:
 1. Rust CLI skeleton.
 2. SQLite metadata store.
 3. `source add local`.
-4. Codex transcript scanner.
-5. `sessions` and `status` with simple metadata/FTS search.
-6. Add embeddings and LanceDB.
-7. Add hooks after status is useful from the CLI.
+4. `enable` and `disable`.
+5. Codex transcript scanner.
+6. `sessions` and `status` with simple metadata/FTS search.
+7. Hook event capture with no advice unless enabled.
+8. Add clustering, embeddings, and LanceDB.
+9. Add advice after status is useful from the CLI.
 
 This avoids debugging hooks before the core session lookup works.
 

@@ -38,6 +38,8 @@ fn run(args: &[String]) -> Result<i32, String> {
         [cmd] if cmd == "adapters" => adapters(),
         [cmd, agent] if cmd == "connect" => connect_agent(agent),
         [cmd, agent] if cmd == "init" => init_agent(agent),
+        [cmd, scope] if cmd == "enable" => set_enablement(scope, true),
+        [cmd, scope] if cmd == "disable" => set_enablement(scope, false),
         [cmd, sub, kind, path, flag, agent]
             if cmd == "source" && sub == "add" && kind == "local" && flag == "--agent" =>
         {
@@ -72,6 +74,8 @@ Usage:
   tw doctor
   tw connect codex
   tw source add local <path> --agent <kind>
+  tw enable <agent-or-source>
+  tw disable <agent-or-source>
   tw adapters
   tw init codex
   tw status
@@ -138,6 +142,12 @@ fn adapters() -> Result<i32, String> {
         print_file(&paths.sources_file)?;
     }
 
+    if paths.enablements_file.is_file() {
+        println!();
+        println!("Enablements");
+        print_file(&paths.enablements_file)?;
+    }
+
     Ok(0)
 }
 
@@ -196,6 +206,19 @@ fn source_add_local(path: &str, agent: &str) -> Result<i32, String> {
     println!("agent: {agent}");
     println!("kind: local");
     println!("path: {}", source_path.display());
+    Ok(0)
+}
+
+fn set_enablement(scope: &str, enabled: bool) -> Result<i32, String> {
+    let paths = AppPaths::resolve()?;
+    fs::create_dir_all(&paths.config_dir)
+        .map_err(|err| format!("failed to create {}: {err}", paths.config_dir.display()))?;
+
+    let state = if enabled { "enabled" } else { "disabled" };
+    let record = format!("{scope}\t{state}\tmanual\t{}", unix_timestamp());
+    upsert_line(&paths.enablements_file, scope, &record)?;
+
+    println!("{state} {scope}");
     Ok(0)
 }
 
@@ -364,6 +387,7 @@ struct AppPaths {
     data_dir: PathBuf,
     sources_file: PathBuf,
     adapters_file: PathBuf,
+    enablements_file: PathBuf,
     default_codex_config: PathBuf,
     default_codex_sessions: PathBuf,
 }
@@ -385,6 +409,7 @@ impl AppPaths {
         Ok(Self {
             sources_file: config_dir.join("sources.tsv"),
             adapters_file: config_dir.join("adapters.tsv"),
+            enablements_file: config_dir.join("enablements.tsv"),
             default_codex_config: home.join(".codex").join("config.toml"),
             default_codex_sessions: home.join(".codex").join("sessions"),
             config_dir,

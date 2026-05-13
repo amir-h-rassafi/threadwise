@@ -14,6 +14,7 @@ MVP requirements:
 - Codex CLI only for the first working release.
 - Use Codex `UserPromptSubmit` for pre-prompt advice.
 - Use Codex `Stop` or transcript updates to refresh summaries.
+- Enable hooks and advice only for explicitly enabled agents or sources.
 - Track agent kind, agent version, adapter version, and supported capabilities
   for compatibility and debugging.
 - No wrapper command for normal prompt entry.
@@ -44,13 +45,18 @@ blockers.
 
 ## User Loop
 
-1. User works in Codex normally.
-2. Codex runs the Threadwise pre-prompt hook.
-3. Threadwise compares the prompt with the current session and recent Codex
-   sessions.
-4. If confidence is low, Threadwise returns nothing.
-5. If confidence is high, Threadwise returns a concise recommendation or a
+1. User connects an agent and explicitly enables the agent or a local source.
+2. User works in Codex normally.
+3. Codex runs the Threadwise pre-prompt hook only for enabled scope.
+4. Threadwise captures hook metadata and compares the prompt with current and
+   recent Codex sessions.
+5. Threadwise clusters related session evidence using transcript, repo,
+   process, and task metadata where available.
+6. If confidence is low, Threadwise returns nothing.
+7. If confidence is high, Threadwise returns a concise recommendation or a
    focused handoff prompt.
+
+The hook must be quiet unless the active session is inside enabled scope.
 
 Example:
 
@@ -62,6 +68,57 @@ Suggested handoff:
 Review test coverage for the docs parser. Do not edit files. Return only
 missing coverage and risk areas with file references.
 ```
+
+## Enablement Model
+
+Threadwise has three separate steps:
+
+```text
+tw connect codex
+tw source add local ~/.codex/sessions --agent codex
+tw enable codex
+```
+
+- `connect` detects an agent binary, version, config, transcript location, and
+  capabilities.
+- `source add local` registers a transcript/session directory.
+- `enable` turns on advice for one agent or source.
+- `disable` turns advice back off without deleting stored metadata.
+
+Default behavior:
+
+- Detecting an agent does not enable advice.
+- Registering a source does not enable advice.
+- Hook commands should no-op unless the current event matches an enabled agent
+  or source.
+- Explicit enablement is recorded with scope, timestamp, and reason.
+
+## Session Clustering
+
+Threadwise should cluster session evidence before recommending a new or resumed
+session.
+
+Inputs:
+
+- Agent kind and session id.
+- Repo root and current working directory.
+- Transcript path and last modified time.
+- Process metadata when available: pid, parent pid, executable path, start time.
+- Hook event metadata: event type, timestamp, cwd, prompt hash, transcript hint.
+- Touched files and commands.
+- Local summary and vector similarity.
+- Recency and TTL window.
+
+Use agent and version fields to parse safely and debug behavior. Do not rank a
+candidate higher just because the agent version matches. Rank by task,
+repository, files, commands, recency, and semantic similarity.
+
+Cluster outputs:
+
+- Current active session.
+- Related existing sessions.
+- Likely stale sessions.
+- Suggested split target when the active prompt diverges from current context.
 
 ## Architecture
 
@@ -132,13 +189,15 @@ Client wiring should be easy:
 tw init codex
 tw connect codex
 tw source add local ~/.codex/sessions --agent codex
+tw enable codex
 tw doctor
 ```
 
 `init` installs or prints hook config. `connect` auto-detects agent binary,
 version, config path, transcript path, and supported capabilities. `source add
 local` lets a user register a transcript/session directory explicitly when
-auto-detection is wrong or unsupported.
+auto-detection is wrong or unsupported. `enable` is the explicit opt-in gate
+for advice.
 
 ## Storage
 
@@ -148,6 +207,10 @@ SQLite tables:
 
 - `agents`: agent kind, agent version, adapter version, executable path,
   capabilities, first seen, last seen.
+- `sources`: agent id, source kind, path, enabled, last scan.
+- `enablements`: scope kind, scope id, enabled, reason, timestamps.
+- `hook_events`: agent id, session id, event type, pid, parent pid, cwd,
+  prompt hash, transcript hint, timestamp.
 - `sessions`: agent id, session id, repo root, title, status, timestamps.
 - `turns`: session id, role, content, files mentioned, commands mentioned.
 - `summaries`: session id, objective, state, touched files, open questions,
@@ -231,6 +294,8 @@ MVP commands:
   transcript path, and capabilities.
 - `tw source add local <path> --agent <kind>`: register a local
   transcript/session directory explicitly.
+- `tw enable <agent-or-source>`: opt an agent or source into advice.
+- `tw disable <agent-or-source>`: turn advice off without deleting metadata.
 - `tw adapters`: list detected agents, versions, and capabilities.
 - `tw status`: show active session, related sessions, and advice.
 - `tw handoff`: print the current split handoff prompt.
@@ -247,23 +312,26 @@ Hook commands:
 
 1. Define the normalized event schema.
 2. Define the adapter registry and capability model.
-3. Build the SQLite metadata store.
-4. Add LanceDB-backed `VectorIndex`.
-5. Add local embeddings with `fastembed-rs`.
-6. Implement Codex auto-detection for binary, version, config, hooks, and
+3. Define enablement scopes for agents and local sources.
+4. Build the SQLite metadata store.
+5. Add LanceDB-backed `VectorIndex`.
+6. Add local embeddings with `fastembed-rs`.
+7. Implement Codex auto-detection for binary, version, config, hooks, and
    transcript path.
-7. Read Codex transcripts under `~/.codex/sessions`.
-8. Detect the active Codex session for the current repo.
-9. Implement `tw status` using hybrid search and metadata scoring.
-10. Implement Codex `UserPromptSubmit` and `Stop` hook commands.
-11. Implement `tw handoff`.
-12. Add `tw init codex`, `tw connect codex`,
-    `tw source add local`, `tw adapters`, and
+8. Capture hook metadata, including pid/cwd/session hints when available.
+9. Read Codex transcripts under `~/.codex/sessions`.
+10. Cluster active and related sessions by transcript, repo, pid/process, files,
+    commands, recency, and semantic similarity.
+11. Implement `tw status` using hybrid search and metadata scoring.
+12. Implement Codex `UserPromptSubmit` and `Stop` hook commands.
+13. Implement `tw handoff`.
+14. Add `tw init codex`, `tw connect codex`,
+    `tw source add local`, `tw enable`, `tw disable`, `tw adapters`, and
     `tw doctor`.
-13. Add release automation for macOS and Linux multi-arch binaries.
-14. Add Homebrew and apt packaging.
-15. Tune thresholds with real Codex sessions.
-16. Add Claude Code as the second adapter after the Codex MVP is reliable.
+15. Add release automation for macOS and Linux multi-arch binaries.
+16. Add Homebrew and apt packaging.
+17. Tune thresholds with real Codex sessions.
+18. Add Claude Code as the second adapter after the Codex MVP is reliable.
 
 ## Later
 
