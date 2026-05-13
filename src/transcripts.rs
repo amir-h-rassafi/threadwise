@@ -94,7 +94,7 @@ fn system_time_secs(time: SystemTime) -> Option<u64> {
         .map(|duration| duration.as_secs())
 }
 
-pub fn parse_transcript(path: &Path) -> Result<TranscriptSummary, String> {
+pub fn parse_transcript(path: &Path, agent_kind: &str) -> Result<TranscriptSummary, String> {
     let file =
         fs::File::open(path).map_err(|err| format!("failed to open {}: {err}", path.display()))?;
     let reader = BufReader::new(file);
@@ -123,9 +123,9 @@ pub fn parse_transcript(path: &Path) -> Result<TranscriptSummary, String> {
             summary.last_timestamp = Some(timestamp.to_string());
         }
 
-        match value.get("type").and_then(Value::as_str) {
-            Some("session_meta") => apply_session_meta(&value, &mut summary),
-            Some("event_msg") => apply_event_msg(&value, &mut summary),
+        match agent_kind {
+            "codex" => apply_codex_event(&value, &mut summary),
+            "claude-code" => apply_claude_code_event(&value, &mut summary),
             _ => {}
         }
     }
@@ -135,6 +135,65 @@ pub fn parse_transcript(path: &Path) -> Result<TranscriptSummary, String> {
     }
 
     Ok(summary)
+}
+
+fn apply_codex_event(value: &Value, summary: &mut TranscriptSummary) {
+    match value.get("type").and_then(Value::as_str) {
+        Some("session_meta") => apply_session_meta(value, summary),
+        Some("event_msg") => apply_event_msg(value, summary),
+        _ => {}
+    }
+}
+
+fn apply_claude_code_event(value: &Value, summary: &mut TranscriptSummary) {
+    if summary.session_id.is_none()
+        && let Some(id) = value.get("sessionId").and_then(Value::as_str)
+    {
+        summary.session_id = Some(id.to_string());
+    }
+    if summary.cwd.is_none()
+        && let Some(cwd) = value.get("cwd").and_then(Value::as_str)
+    {
+        summary.cwd = Some(cwd.to_string());
+    }
+    if summary.cli_version.is_none()
+        && let Some(version) = value.get("version").and_then(Value::as_str)
+    {
+        summary.cli_version = Some(version.to_string());
+    }
+
+    let Some(event_type) = value.get("type").and_then(Value::as_str) else {
+        return;
+    };
+    let message = value.get("message");
+
+    match event_type {
+        "user" => {
+            summary.user_messages += 1;
+            if let Some(content) = message
+                .and_then(|m| m.get("content"))
+                .and_then(Value::as_str)
+            {
+                append_text(content, &mut summary.summary_text);
+            }
+        }
+        "assistant" => {
+            summary.agent_messages += 1;
+            if let Some(items) = message
+                .and_then(|m| m.get("content"))
+                .and_then(Value::as_array)
+            {
+                for item in items {
+                    if item.get("type").and_then(Value::as_str) == Some("text")
+                        && let Some(text) = item.get("text").and_then(Value::as_str)
+                    {
+                        append_text(text, &mut summary.summary_text);
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
 }
 
 fn apply_session_meta(value: &Value, summary: &mut TranscriptSummary) {
@@ -177,19 +236,24 @@ fn apply_event_msg(value: &Value, summary: &mut TranscriptSummary) {
 }
 
 fn append_message_text(payload: &Value, summary_text: &mut String) {
-    if summary_text.len() >= SUMMARY_TEXT_CAP {
-        return;
-    }
     let text = payload
         .get("message")
         .or_else(|| payload.get("text"))
         .or_else(|| payload.get("content"))
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty());
-    let Some(text) = text else {
+        .and_then(Value::as_str);
+    if let Some(text) = text {
+        append_text(text, summary_text);
+    }
+}
+
+fn append_text(text: &str, summary_text: &mut String) {
+    if summary_text.len() >= SUMMARY_TEXT_CAP {
         return;
-    };
+    }
+    let text = text.trim();
+    if text.is_empty() {
+        return;
+    }
     if !summary_text.is_empty() {
         summary_text.push(' ');
     }

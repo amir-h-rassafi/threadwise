@@ -114,7 +114,7 @@ pub fn build_session_index(
 
         let mut transcripts = Vec::new();
         for file in files {
-            let summary = parse_transcript(file.path())?;
+            let summary = parse_transcript(file.path(), &source.agent)?;
             if summary.parse_errors == 0 {
                 parsed_transcripts += 1;
             }

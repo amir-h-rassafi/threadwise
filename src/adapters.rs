@@ -7,6 +7,8 @@ use crate::paths::AppPaths;
 use crate::registry::unix_timestamp;
 
 const CODEX_ADAPTER_VERSION: &str = concat!("tw-codex-adapter ", env!("CARGO_PKG_VERSION"));
+const CLAUDE_CODE_ADAPTER_VERSION: &str =
+    concat!("tw-claude-code-adapter ", env!("CARGO_PKG_VERSION"));
 
 pub trait AgentAdapter {
     fn kind(&self) -> &'static str;
@@ -15,7 +17,7 @@ pub trait AgentAdapter {
 }
 
 pub fn available_adapters() -> Vec<Box<dyn AgentAdapter>> {
-    vec![Box::new(CodexAdapter)]
+    vec![Box::new(CodexAdapter), Box::new(ClaudeCodeAdapter)]
 }
 
 pub fn adapter_for_kind(kind: &str) -> Result<Box<dyn AgentAdapter>, String> {
@@ -60,15 +62,71 @@ impl AgentAdapter for CodexAdapter {
 
     fn init_instructions(&self) -> String {
         "\
-Add Threadwise to the Codex hooks configuration:
+Add Threadwise to ~/.codex/config.toml (note the double brackets:
+codex parses each hook list as an array of tables):
 
-[hooks.UserPromptSubmit]
+[[hooks.UserPromptSubmit]]
 command = \"tw hook codex-user-prompt-submit\"
 
-[hooks.Stop]
+[[hooks.Stop]]
 command = \"tw hook codex-stop\"
 
 Run `tw connect codex` after updating hook configuration.
+"
+        .to_string()
+    }
+}
+
+struct ClaudeCodeAdapter;
+
+impl AgentAdapter for ClaudeCodeAdapter {
+    fn kind(&self) -> &'static str {
+        "claude-code"
+    }
+
+    fn detect(&self, paths: &AppPaths) -> AgentDetection {
+        let executable_path = find_in_path("claude");
+        let version = executable_path
+            .as_ref()
+            .and_then(|path| command_version(path));
+        let mut capabilities = Vec::new();
+
+        if executable_path.is_some() {
+            capabilities.push("cli".to_string());
+            capabilities.push("hooks".to_string());
+        }
+        if paths.default_claude_projects.is_dir() {
+            capabilities.push("transcripts".to_string());
+        }
+
+        AgentDetection {
+            kind: self.kind(),
+            adapter_version: CLAUDE_CODE_ADAPTER_VERSION.to_string(),
+            executable_path,
+            version,
+            config_path: Some(paths.default_claude_config.clone()),
+            sessions_path: Some(paths.default_claude_projects.clone()),
+            capabilities,
+        }
+    }
+
+    fn init_instructions(&self) -> String {
+        "\
+Add Threadwise to your Claude Code settings.json:
+
+{
+  \"hooks\": {
+    \"UserPromptSubmit\": [
+      {\"hooks\": [{\"type\": \"command\", \"command\": \"tw hook claude-code-user-prompt-submit\"}]}
+    ],
+    \"Stop\": [
+      {\"hooks\": [{\"type\": \"command\", \"command\": \"tw hook claude-code-stop\"}]}
+    ]
+  }
+}
+
+Settings file is typically at ~/.claude/settings.json.
+Run `tw connect claude-code` after updating hooks.
 "
         .to_string()
     }

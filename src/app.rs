@@ -42,10 +42,7 @@ pub fn run(args: &[String]) -> Result<i32, String> {
             planned(cmd);
             Ok(2)
         }
-        [cmd, sub] if cmd == "hook" && sub == "codex-user-prompt-submit" => {
-            hook_codex(HookKind::CodexUserPromptSubmit)
-        }
-        [cmd, sub] if cmd == "hook" && sub == "codex-stop" => hook_codex(HookKind::CodexStop),
+        [cmd, sub] if cmd == "hook" => dispatch_hook(sub),
         _ => {
             print_help();
             Ok(2)
@@ -61,12 +58,12 @@ Threadwise CLI
 Usage:
   tw --version
   tw doctor
-  tw connect codex
+  tw connect <agent>                 # codex | claude-code
   tw source add local <path> --agent <kind>
   tw enable <agent-or-source>
   tw disable <agent-or-source>
   tw adapters
-  tw init codex
+  tw init <agent>                    # codex | claude-code
   tw status
   tw sessions
   tw handoff
@@ -75,6 +72,8 @@ Usage:
 Hook commands:
   tw hook codex-user-prompt-submit
   tw hook codex-stop
+  tw hook claude-code-user-prompt-submit
+  tw hook claude-code-stop
 "
     );
 }
@@ -319,9 +318,22 @@ fn status() -> Result<i32, String> {
     Ok(0)
 }
 
-fn hook_codex(kind: HookKind) -> Result<i32, String> {
-    let _ = run_hook("codex", kind);
-    Ok(0)
+fn dispatch_hook(sub: &str) -> Result<i32, String> {
+    for adapter in available_adapters() {
+        let kind = adapter.kind();
+        let Some(event) = sub.strip_prefix(kind).and_then(|s| s.strip_prefix('-')) else {
+            continue;
+        };
+        let hook_kind = match event {
+            "user-prompt-submit" => HookKind::UserPromptSubmit,
+            "stop" => HookKind::Stop,
+            _ => continue,
+        };
+        let _ = run_hook(kind, hook_kind);
+        return Ok(0);
+    }
+    print_help();
+    Ok(2)
 }
 
 fn run_hook(agent: &str, kind: HookKind) -> Result<i32, String> {
@@ -339,7 +351,7 @@ fn run_hook(agent: &str, kind: HookKind) -> Result<i32, String> {
         return Ok(0);
     }
 
-    if kind == HookKind::CodexStop {
+    if kind == HookKind::Stop {
         return Ok(0);
     }
 

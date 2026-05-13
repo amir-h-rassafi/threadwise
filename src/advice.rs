@@ -18,7 +18,7 @@ pub struct Recommendation {
 }
 
 pub fn recommend_for_hook(index: &SessionIndex, event: &HookEvent) -> Option<Recommendation> {
-    if event.kind != HookKind::CodexUserPromptSubmit {
+    if event.kind != HookKind::UserPromptSubmit {
         return None;
     }
 

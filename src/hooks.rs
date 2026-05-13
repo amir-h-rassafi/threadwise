@@ -5,8 +5,8 @@ use serde_json::Value;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum HookKind {
-    CodexUserPromptSubmit,
-    CodexStop,
+    UserPromptSubmit,
+    Stop,
 }
 
 pub struct HookEvent {

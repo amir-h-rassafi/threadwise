@@ -9,6 +9,8 @@ pub struct AppPaths {
     pub enablements_file: PathBuf,
     pub default_codex_config: PathBuf,
     pub default_codex_sessions: PathBuf,
+    pub default_claude_config: PathBuf,
+    pub default_claude_projects: PathBuf,
 }
 
 impl AppPaths {
@@ -31,6 +33,8 @@ impl AppPaths {
             enablements_file: config_dir.join("enablements.tsv"),
             default_codex_config: home.join(".codex").join("config.toml"),
             default_codex_sessions: home.join(".codex").join("sessions"),
+            default_claude_config: home.join(".claude").join("settings.json"),
+            default_claude_projects: home.join(".claude").join("projects"),
             config_dir,
             data_dir,
         })
