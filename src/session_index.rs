@@ -38,6 +38,7 @@ pub struct IndexedTranscript {
     pub parse_errors: usize,
     pub relation: WorkspaceRelation,
     pub score: u16,
+    pub summary_text: String,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -135,6 +136,7 @@ pub fn build_session_index(
                 parse_errors: summary.parse_errors,
                 relation,
                 score,
+                summary_text: summary.summary_text,
             });
         }
 

@@ -38,7 +38,10 @@ pub struct TranscriptSummary {
     pub task_started: usize,
     pub task_complete: usize,
     pub parse_errors: usize,
+    pub summary_text: String,
 }
+
+const SUMMARY_TEXT_CAP: usize = 4096;
 
 pub fn discover_transcripts(root: &Path) -> Result<Vec<TranscriptFile>, String> {
     let mut transcripts = Vec::new();
@@ -151,20 +154,53 @@ fn apply_session_meta(value: &Value, summary: &mut TranscriptSummary) {
 }
 
 fn apply_event_msg(value: &Value, summary: &mut TranscriptSummary) {
-    let Some(payload_type) = value
-        .get("payload")
-        .and_then(|payload| payload.get("type"))
-        .and_then(Value::as_str)
-    else {
+    let Some(payload) = value.get("payload") else {
+        return;
+    };
+    let Some(payload_type) = payload.get("type").and_then(Value::as_str) else {
         return;
     };
 
     match payload_type {
-        "user_message" => summary.user_messages += 1,
-        "agent_message" => summary.agent_messages += 1,
+        "user_message" => {
+            summary.user_messages += 1;
+            append_message_text(payload, &mut summary.summary_text);
+        }
+        "agent_message" => {
+            summary.agent_messages += 1;
+            append_message_text(payload, &mut summary.summary_text);
+        }
         "task_started" => summary.task_started += 1,
         "task_complete" => summary.task_complete += 1,
         _ => {}
+    }
+}
+
+fn append_message_text(payload: &Value, summary_text: &mut String) {
+    if summary_text.len() >= SUMMARY_TEXT_CAP {
+        return;
+    }
+    let text = payload
+        .get("message")
+        .or_else(|| payload.get("text"))
+        .or_else(|| payload.get("content"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let Some(text) = text else {
+        return;
+    };
+    if !summary_text.is_empty() {
+        summary_text.push(' ');
+    }
+    let mut budget = SUMMARY_TEXT_CAP.saturating_sub(summary_text.len());
+    for ch in text.chars() {
+        let width = ch.len_utf8();
+        if width > budget {
+            break;
+        }
+        summary_text.push(ch);
+        budget -= width;
     }
 }
 

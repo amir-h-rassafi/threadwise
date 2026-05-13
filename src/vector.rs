@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use std::cmp::Ordering;
 
 pub type VectorId = String;
@@ -13,10 +11,6 @@ pub struct VectorMatch {
 pub trait VectorIndex {
     fn add(&mut self, id: VectorId, embedding: Vec<f32>);
     fn search(&self, query: &[f32], top_k: usize) -> Vec<VectorMatch>;
-    fn len(&self) -> usize;
-    fn is_empty(&self) -> bool {
-        self.len() == 0
-    }
 }
 
 pub struct InMemoryVectorIndex {
@@ -26,12 +20,6 @@ pub struct InMemoryVectorIndex {
 impl InMemoryVectorIndex {
     pub fn new() -> Self {
         Self { items: Vec::new() }
-    }
-}
-
-impl Default for InMemoryVectorIndex {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
@@ -68,10 +56,6 @@ impl VectorIndex for InMemoryVectorIndex {
         });
         scored.truncate(top_k);
         scored
-    }
-
-    fn len(&self) -> usize {
-        self.items.len()
     }
 }
 
@@ -164,14 +148,15 @@ mod tests {
             "x".to_string(),
             embed_text("second different content entirely", 64),
         );
-        assert_eq!(index.len(), 1);
+        let hits = index.search(&embed_text("second", 64), 10);
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].id, "x");
     }
 
     #[test]
     fn empty_query_or_empty_index_is_empty() {
-        let index = InMemoryVectorIndex::new();
-        assert!(index.is_empty());
-        assert!(index.search(&[0.0; 8], 5).is_empty());
+        let empty = InMemoryVectorIndex::new();
+        assert!(empty.search(&[0.0; 8], 5).is_empty());
 
         let mut populated = InMemoryVectorIndex::new();
         populated.add("a".to_string(), embed_text("anything", 16));
