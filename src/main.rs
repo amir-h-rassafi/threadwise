@@ -2,6 +2,7 @@ mod adapters;
 mod app;
 mod paths;
 mod registry;
+mod session_index;
 mod transcripts;
 
 use std::env;

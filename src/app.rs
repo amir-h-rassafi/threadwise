@@ -7,7 +7,7 @@ use crate::registry::{
     normalize_existing_dir, print_file, read_enablements, read_sources, source_key, source_record,
     unix_timestamp, upsert_line,
 };
-use crate::transcripts::{discover_transcripts, parse_transcript};
+use crate::session_index::build_session_index;
 
 pub fn run(args: &[String]) -> Result<i32, String> {
     match args {
@@ -217,6 +217,7 @@ fn sessions() -> Result<i32, String> {
     let paths = AppPaths::resolve()?;
     let sources = read_sources(&paths)?;
     let enablements = read_enablements(&paths)?;
+    let workspace = env::current_dir().map_err(|err| format!("failed to read cwd: {err}"))?;
 
     if sources.is_empty() {
         println!("No registered sources.");
@@ -224,44 +225,44 @@ fn sessions() -> Result<i32, String> {
         return Ok(0);
     }
 
+    let index = build_session_index(&sources, &enablements, &workspace)?;
     println!("Registered sources");
-    for source in sources {
-        let transcripts = discover_transcripts(&source.path)?;
+    for source in &index.sources {
         println!("agent: {}", source.agent);
         println!("kind: {}", source.kind);
         println!("path: {}", source.path.display());
         println!("source_state: {}", source.state);
         println!(
             "advice: {}",
-            if enablements.is_enabled(&source.agent)
-                || enablements.is_enabled(&source.path.display().to_string())
-            {
+            if source.advice_enabled {
                 "enabled"
             } else {
                 "disabled"
             }
         );
-        println!(
-            "available: {}",
-            if source.path.is_dir() { "yes" } else { "no" }
-        );
-        println!("transcripts: {}", transcripts.len());
-        for transcript in transcripts.iter().take(10) {
-            let summary = parse_transcript(transcript.path())?;
+        println!("available: {}", if source.available { "yes" } else { "no" });
+        println!("transcripts: {}", source.transcripts.len());
+        for transcript in source.transcripts.iter().take(10) {
             println!(
-                "- {} size={} modified={} events={} user={} agent={} cwd={} id={}",
-                transcript.display_path(&source.path),
+                "- {} relation={} score={} size={} modified={} events={} parse_errors={} user={} agent={} tasks={}/{} cwd={} id={} version={}",
+                transcript.display_path,
+                transcript.relation.as_str(),
+                transcript.score,
                 transcript.bytes,
                 transcript.modified,
-                summary.events,
-                summary.user_messages,
-                summary.agent_messages,
-                summary.cwd.as_deref().unwrap_or("unknown"),
-                summary.session_id.as_deref().unwrap_or("unknown")
+                transcript.events,
+                transcript.parse_errors,
+                transcript.user_messages,
+                transcript.agent_messages,
+                transcript.task_complete,
+                transcript.task_started,
+                transcript.cwd.as_deref().unwrap_or("unknown"),
+                transcript.session_id.as_deref().unwrap_or("unknown"),
+                transcript.cli_version.as_deref().unwrap_or("unknown")
             );
         }
-        if transcripts.len() > 10 {
-            println!("- ... {} more", transcripts.len() - 10);
+        if source.transcripts.len() > 10 {
+            println!("- ... {} more", source.transcripts.len() - 10);
         }
         println!();
     }
@@ -273,54 +274,48 @@ fn status() -> Result<i32, String> {
     let paths = AppPaths::resolve()?;
     let sources = read_sources(&paths)?;
     let enablements = read_enablements(&paths)?;
-    let transcript_count = sources
-        .iter()
-        .map(|source| discover_transcripts(&source.path))
-        .collect::<Result<Vec<_>, _>>()?
-        .iter()
-        .map(Vec::len)
-        .sum::<usize>();
-    let parsed_count = sources
-        .iter()
-        .map(|source| discover_transcripts(&source.path))
-        .collect::<Result<Vec<_>, _>>()?
-        .into_iter()
-        .flatten()
-        .map(|transcript| parse_transcript(transcript.path()))
-        .collect::<Result<Vec<_>, _>>()?
-        .into_iter()
-        .filter(|summary| summary.parse_errors == 0)
-        .count();
-    let enabled_count = sources
-        .iter()
-        .filter(|source| {
-            enablements.is_enabled(&source.agent)
-                || enablements.is_enabled(&source.path.display().to_string())
-        })
-        .count();
+    let workspace = env::current_dir().map_err(|err| format!("failed to read cwd: {err}"))?;
+    let index = build_session_index(&sources, &enablements, &workspace)?;
+    let related = index.related_transcripts();
 
     println!("Threadwise status");
-    println!("registered_sources: {}", sources.len());
-    println!("enabled_sources: {enabled_count}");
-    println!("discovered_transcripts: {transcript_count}");
-    println!("parsed_transcripts: {parsed_count}");
+    println!("active_workspace: {}", index.workspace.display());
+    println!("registered_sources: {}", index.sources.len());
+    println!("enabled_sources: {}", index.enabled_sources);
+    println!("discovered_transcripts: {}", index.total_transcripts);
+    println!("parsed_transcripts: {}", index.parsed_transcripts);
+    println!("related_sessions: {}", related.len());
     println!(
         "advice: {}",
-        if enabled_count > 0 {
+        if index.enabled_sources > 0 {
             "enabled"
         } else {
             "disabled"
         }
     );
+    if let Some((source, transcript)) = related.first() {
+        println!(
+            "top_related: agent={} relation={} score={} modified={} cwd={} id={} path={}",
+            source.agent,
+            transcript.relation.as_str(),
+            transcript.score,
+            transcript.modified,
+            transcript.cwd.as_deref().unwrap_or("unknown"),
+            transcript.session_id.as_deref().unwrap_or("unknown"),
+            transcript.display_path
+        );
+    }
 
     if sources.is_empty() {
         println!("next: tw source add local ~/.codex/sessions --agent codex");
-    } else if enabled_count == 0 {
+    } else if index.enabled_sources == 0 {
         println!("next: tw enable codex");
-    } else if transcript_count == 0 {
+    } else if index.total_transcripts == 0 {
         println!("next: add or wait for agent transcript files");
+    } else if related.is_empty() {
+        println!("next: start or resume an agent in this workspace");
     } else {
-        println!("next: repo filtering and session clustering");
+        println!("next: tw sessions");
     }
 
     Ok(0)

@@ -157,6 +157,20 @@ Core responsibilities:
 - Score `continue_current`, `resume_existing`, and `open_new_agent`.
 - Generate a handoff prompt when a split is recommended.
 
+Current core slice:
+
+- `session_index` is the agent-neutral read model for CLI status and session
+  listing.
+- It reads registered sources, parses transcripts, compares each session cwd to
+  the active workspace, and assigns a deterministic relation:
+  `same_workspace`, `nested_workspace`, `parent_workspace`,
+  `different_workspace`, or `unknown_workspace`.
+- It scores related sessions from workspace relation plus lightweight activity
+  signals. Agent kind and version remain metadata only.
+- It intentionally does not emit advice yet. The next layers should consume the
+  same index for hook decisions, handoff generation, FTS, embeddings, and
+  LanceDB-backed lookup.
+
 Adapter responsibilities:
 
 - Report agent kind, executable path, version, adapter version, and capabilities.

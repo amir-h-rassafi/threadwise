@@ -190,8 +190,10 @@ Done when:
 
 Current implementation note: `tw sessions` now recursively discovers
 registered `.jsonl` and `.json` transcript files, parses safe metadata, and
-reports session id, cwd, event count, and high-level user/agent message counts.
-Repo filtering and clustering are the next steps.
+reports session id, cwd, agent version, event count, parse errors, task counts,
+high-level user/agent message counts, workspace relation, and relation score.
+`tw status` builds the same core session index and reports related sessions for
+the active workspace.
 
 ### M3: Summaries And Search
 
