@@ -6,6 +6,7 @@ mod paths;
 mod registry;
 mod session_index;
 mod transcripts;
+mod vector;
 
 use std::env;
 
