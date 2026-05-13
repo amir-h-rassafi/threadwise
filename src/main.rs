@@ -45,7 +45,9 @@ fn run(args: &[String]) -> Result<i32, String> {
         {
             source_add_local(path, agent)
         }
-        [cmd] if matches!(cmd.as_str(), "status" | "sessions" | "handoff" | "explain") => {
+        [cmd] if cmd == "sessions" => sessions(),
+        [cmd] if cmd == "status" => status(),
+        [cmd] if matches!(cmd.as_str(), "handoff" | "explain") => {
             planned(cmd);
             Ok(2)
         }
@@ -222,6 +224,78 @@ fn set_enablement(scope: &str, enabled: bool) -> Result<i32, String> {
     Ok(0)
 }
 
+fn sessions() -> Result<i32, String> {
+    let paths = AppPaths::resolve()?;
+    let sources = read_sources(&paths)?;
+    let enablements = read_enablements(&paths)?;
+
+    if sources.is_empty() {
+        println!("No registered sources.");
+        println!("Add one with `tw source add local <path> --agent <kind>`.");
+        return Ok(0);
+    }
+
+    println!("Registered sources");
+    for source in sources {
+        println!("agent: {}", source.agent);
+        println!("kind: {}", source.kind);
+        println!("path: {}", source.path.display());
+        println!("source_state: {}", source.state);
+        println!(
+            "advice: {}",
+            if enablements.is_enabled(&source.agent)
+                || enablements.is_enabled(&source.path.display().to_string())
+            {
+                "enabled"
+            } else {
+                "disabled"
+            }
+        );
+        println!(
+            "available: {}",
+            if source.path.is_dir() { "yes" } else { "no" }
+        );
+        println!();
+    }
+
+    Ok(0)
+}
+
+fn status() -> Result<i32, String> {
+    let paths = AppPaths::resolve()?;
+    let sources = read_sources(&paths)?;
+    let enablements = read_enablements(&paths)?;
+    let enabled_count = sources
+        .iter()
+        .filter(|source| {
+            enablements.is_enabled(&source.agent)
+                || enablements.is_enabled(&source.path.display().to_string())
+        })
+        .count();
+
+    println!("Threadwise status");
+    println!("registered_sources: {}", sources.len());
+    println!("enabled_sources: {enabled_count}");
+    println!(
+        "advice: {}",
+        if enabled_count > 0 {
+            "enabled"
+        } else {
+            "disabled"
+        }
+    );
+
+    if sources.is_empty() {
+        println!("next: tw source add local ~/.codex/sessions --agent codex");
+    } else if enabled_count == 0 {
+        println!("next: tw enable codex");
+    } else {
+        println!("next: transcript ingestion");
+    }
+
+    Ok(0)
+}
+
 fn print_agent_detection(detection: &AgentDetection) {
     println!("agent: {}", detection.kind);
     println!("adapter: {}", detection.adapter_version);
@@ -263,6 +337,58 @@ fn print_file(path: &Path) -> Result<(), String> {
         .flush()
         .map_err(|err| format!("failed to flush stdout: {err}"))?;
     Ok(())
+}
+
+fn read_sources(paths: &AppPaths) -> Result<Vec<SourceRecord>, String> {
+    if !paths.sources_file.is_file() {
+        return Ok(Vec::new());
+    }
+
+    let content = read_to_string(&paths.sources_file)?;
+    let mut sources = Vec::new();
+    for line in content.lines().filter(|line| !line.trim().is_empty()) {
+        let fields = line.split('\t').collect::<Vec<_>>();
+        if fields.len() < 5 {
+            continue;
+        }
+        sources.push(SourceRecord {
+            agent: fields[0].to_string(),
+            kind: fields[1].to_string(),
+            path: PathBuf::from(fields[2]),
+            state: fields[3].to_string(),
+        });
+    }
+    Ok(sources)
+}
+
+fn read_enablements(paths: &AppPaths) -> Result<Enablements, String> {
+    if !paths.enablements_file.is_file() {
+        return Ok(Enablements {
+            records: Vec::new(),
+        });
+    }
+
+    let content = read_to_string(&paths.enablements_file)?;
+    let mut records = Vec::new();
+    for line in content.lines().filter(|line| !line.trim().is_empty()) {
+        let fields = line.split('\t').collect::<Vec<_>>();
+        if fields.len() < 2 {
+            continue;
+        }
+        records.push(EnablementRecord {
+            scope: fields[0].to_string(),
+            enabled: fields[1] == "enabled",
+        });
+    }
+    Ok(Enablements { records })
+}
+
+fn read_to_string(path: &Path) -> Result<String, String> {
+    let mut content = String::new();
+    fs::File::open(path)
+        .and_then(|mut file| file.read_to_string(&mut content))
+        .map_err(|err| format!("failed to read {}: {err}", path.display()))?;
+    Ok(content)
 }
 
 fn upsert_line(path: &Path, key: &str, line: &str) -> Result<(), String> {
@@ -433,6 +559,32 @@ fn home_dir() -> Result<PathBuf, String> {
         .filter(|value| !value.is_empty())
         .map(PathBuf::from)
         .ok_or_else(|| "HOME is not set".to_string())
+}
+
+struct SourceRecord {
+    agent: String,
+    kind: String,
+    path: PathBuf,
+    state: String,
+}
+
+struct Enablements {
+    records: Vec<EnablementRecord>,
+}
+
+impl Enablements {
+    fn is_enabled(&self, scope: &str) -> bool {
+        self.records
+            .iter()
+            .rev()
+            .find(|record| record.scope == scope)
+            .is_some_and(|record| record.enabled)
+    }
+}
+
+struct EnablementRecord {
+    scope: String,
+    enabled: bool,
 }
 
 trait AgentAdapter {

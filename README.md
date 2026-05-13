@@ -20,6 +20,8 @@ Run the local CLI through Cargo:
 cargo run -- doctor
 cargo run -- connect codex
 cargo run -- source add local ~/.codex/sessions --agent codex
+cargo run -- enable codex
+cargo run -- status
 ```
 
 Release builds are produced by the GitHub Actions release workflow when a
