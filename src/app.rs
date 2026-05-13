@@ -2,14 +2,17 @@ use std::env;
 use std::fs;
 
 use crate::adapters::{adapter_for_kind, available_adapters, print_agent_detection};
-use crate::advice::recommend_for_hook;
-use crate::hooks::{HookKind, read_hook_event};
+use crate::advice::{
+    RecommendationAction, SUMMARY_EMBEDDING_DIM, pick_best_match, recommend_for_hook,
+};
+use crate::hooks::{HookEvent, HookKind, read_hook_event};
 use crate::paths::AppPaths;
 use crate::registry::{
     normalize_existing_dir, print_file, read_enablements, read_sources, source_key, source_record,
     unix_timestamp, upsert_line,
 };
 use crate::session_index::build_session_index;
+use crate::vector::embed_text;
 
 pub fn run(args: &[String]) -> Result<i32, String> {
     match args {
@@ -46,6 +49,7 @@ pub fn run(args: &[String]) -> Result<i32, String> {
             graph(limit)
         }
         [cmd] if cmd == "explain" => explain(),
+        [cmd, agent, prompt] if cmd == "probe" => probe(agent, prompt),
         [cmd] if cmd == "handoff" => {
             planned(cmd);
             Ok(2)
@@ -75,6 +79,7 @@ Usage:
   tw status
   tw sessions
   tw graph [--top N]                 # mermaid flowchart of workspace + related sessions
+  tw probe <agent> <prompt>          # simulate the hook decision for a prompt
   tw handoff
   tw explain
 
@@ -322,6 +327,157 @@ fn status() -> Result<i32, String> {
         println!("next: start or resume an agent in this workspace");
     } else {
         println!("next: tw sessions");
+    }
+
+    Ok(0)
+}
+
+const SPLIT_TRIGGERS: &[&str] = &[
+    "new agent",
+    "another agent",
+    "separate agent",
+    "parallel agent",
+    "open an agent",
+    "split this",
+    "split out",
+    "handoff",
+];
+
+const RESUME_TRIGGERS: &[&str] = &[
+    "resume previous",
+    "resume existing",
+    "continue previous",
+    "previous session",
+    "old session",
+    "related session",
+];
+
+fn probe(agent: &str, prompt: &str) -> Result<i32, String> {
+    adapter_for_kind(agent)?;
+    let paths = AppPaths::resolve()?;
+    let sources = read_sources(&paths)?;
+    let enablements = read_enablements(&paths)?;
+    let workspace = env::current_dir().map_err(|err| format!("failed to read cwd: {err}"))?;
+
+    println!("Threadwise probe");
+    println!("agent: {agent}");
+    println!("cwd: {}", workspace.display());
+    println!("prompt: {prompt:?}");
+
+    let agent_sources: Vec<_> = sources.iter().filter(|s| s.agent == agent).collect();
+    let agent_enabled = enablements.is_enabled(agent);
+    let enabled_sources: Vec<_> = agent_sources
+        .iter()
+        .filter(|s| agent_enabled || enablements.is_enabled(&s.path.display().to_string()))
+        .collect();
+    let hook_would_fire = !enabled_sources.is_empty();
+
+    println!();
+    println!("enablement:");
+    println!("  registered_sources_for_agent: {}", agent_sources.len());
+    println!("  agent_scope_enabled: {agent_enabled}");
+    println!("  enabled_sources: {}", enabled_sources.len());
+    println!("  hook_would_fire: {hook_would_fire}");
+
+    let prompt_lower = prompt.to_ascii_lowercase();
+    let matched_split: Vec<&str> = SPLIT_TRIGGERS
+        .iter()
+        .copied()
+        .filter(|t| prompt_lower.contains(t))
+        .collect();
+    let matched_resume: Vec<&str> = RESUME_TRIGGERS
+        .iter()
+        .copied()
+        .filter(|t| prompt_lower.contains(t))
+        .collect();
+    let intent = if !matched_split.is_empty() {
+        "split"
+    } else if !matched_resume.is_empty() {
+        "resume"
+    } else {
+        "none"
+    };
+
+    println!();
+    println!("prompt_intent: {intent}");
+    println!("  matched_split: {matched_split:?}");
+    println!("  matched_resume: {matched_resume:?}");
+    if intent == "none" {
+        println!("  (silent: prompt has no split or resume phrasing)");
+        println!("  to trigger split:  include one of {SPLIT_TRIGGERS:?}");
+        println!("  to trigger resume: include one of {RESUME_TRIGGERS:?}");
+    }
+
+    let index = build_session_index(&sources, &enablements, &workspace)?;
+    let related = index.related_transcripts();
+
+    println!();
+    println!("session_index:");
+    println!("  discovered_transcripts: {}", index.total_transcripts);
+    println!("  parsed_transcripts:     {}", index.parsed_transcripts);
+    println!("  related_sessions:       {}", related.len());
+
+    let query = embed_text(prompt, SUMMARY_EMBEDDING_DIM);
+    for (i, (source, t)) in related.iter().take(3).enumerate() {
+        let similarity = if t.summary_text.is_empty() {
+            0.0
+        } else {
+            let s = embed_text(&t.summary_text, SUMMARY_EMBEDDING_DIM);
+            crate::vector::cosine_similarity(&query, &s)
+        };
+        println!(
+            "  candidate[{i}]: agent={} id={} relation={} score={} similarity={:.2}",
+            source.agent,
+            t.session_id.as_deref().unwrap_or("?"),
+            t.relation.as_str(),
+            t.score,
+            similarity,
+        );
+    }
+    if let Some((_, t, score)) = pick_best_match(&related, prompt) {
+        println!(
+            "  best_match: id={} similarity={:.2} threshold=0.15 (soft-resume fires above threshold)",
+            t.session_id.as_deref().unwrap_or("?"),
+            score,
+        );
+    }
+
+    let event = HookEvent {
+        agent: agent.to_string(),
+        kind: HookKind::UserPromptSubmit,
+        cwd: workspace.clone(),
+        prompt: Some(prompt.to_string()),
+        session_id: None,
+    };
+    let outcome = recommend_for_hook(&index, &event);
+
+    println!();
+    if !hook_would_fire {
+        println!("decision: silent (enablement gate)");
+        println!("  reason: no enabled source matches agent '{agent}'");
+        println!("  fix:    tw enable {agent}");
+    } else {
+        match outcome {
+            Some(rec) => {
+                let action = match rec.action {
+                    RecommendationAction::ResumeExisting => "resume existing session",
+                    RecommendationAction::OpenNewAgent => "open new agent",
+                };
+                println!("decision: {action}");
+                println!("---");
+                println!("{}", rec.render());
+            }
+            None => {
+                println!("decision: silent");
+                if intent == "none" {
+                    println!("  reason: prompt_intent is none");
+                } else if related.is_empty() {
+                    println!("  reason: intent matched but no related sessions found");
+                } else {
+                    println!("  reason: intent matched but no actionable target");
+                }
+            }
+        }
     }
 
     Ok(0)

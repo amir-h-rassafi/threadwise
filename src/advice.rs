@@ -2,7 +2,8 @@ use crate::hooks::{HookEvent, HookKind};
 use crate::session_index::{IndexedSource, IndexedTranscript, SessionIndex};
 use crate::vector::{InMemoryVectorIndex, VectorIndex, embed_text};
 
-const SUMMARY_EMBEDDING_DIM: usize = 256;
+pub const SUMMARY_EMBEDDING_DIM: usize = 256;
+const SOFT_RESUME_THRESHOLD: f32 = 0.15;
 
 pub enum RecommendationAction {
     ResumeExisting,
@@ -31,7 +32,7 @@ pub fn recommend_for_hook(index: &SessionIndex, event: &HookEvent) -> Option<Rec
     match intent {
         PromptIntent::Split => Some(open_new_agent(prompt)),
         PromptIntent::Resume => resume_existing(index, event),
-        PromptIntent::None => None,
+        PromptIntent::None => soft_resume(index, event),
     }
 }
 
@@ -116,7 +117,9 @@ fn resume_existing(index: &SessionIndex, event: &HookEvent) -> Option<Recommenda
         return None;
     }
 
-    let (_, transcript) = pick_best_match(&related, prompt).unwrap_or(related[0]);
+    let (source, transcript, score) =
+        pick_best_match(&related, prompt).unwrap_or((related[0].0, related[0].1, 0.0));
+    let _ = source;
     let session_id = transcript.session_id.as_deref()?;
 
     if event.session_id.as_deref() == Some(session_id) {
@@ -127,18 +130,51 @@ fn resume_existing(index: &SessionIndex, event: &HookEvent) -> Option<Recommenda
         action: RecommendationAction::ResumeExisting,
         confidence: 85,
         reason: format!(
-            "prompt asks for prior context and the best related session is {}",
-            transcript.relation.as_str()
+            "prompt asks for prior context and the best related session is {} (similarity {:.2})",
+            transcript.relation.as_str(),
+            score,
         ),
         session_id: Some(session_id.to_string()),
         handoff: None,
     })
 }
 
-fn pick_best_match<'a>(
+fn soft_resume(index: &SessionIndex, event: &HookEvent) -> Option<Recommendation> {
+    let prompt = event.prompt.as_deref()?.trim();
+    if prompt.is_empty() {
+        return None;
+    }
+    let related = index.related_transcripts();
+    if related.is_empty() {
+        return None;
+    }
+
+    let (_, transcript, score) = pick_best_match(&related, prompt)?;
+    if score < SOFT_RESUME_THRESHOLD {
+        return None;
+    }
+    let session_id = transcript.session_id.as_deref()?;
+    if event.session_id.as_deref() == Some(session_id) {
+        return None;
+    }
+
+    Some(Recommendation {
+        action: RecommendationAction::ResumeExisting,
+        confidence: 70,
+        reason: format!(
+            "prompt overlaps a {} session (similarity {:.2}); consider resuming",
+            transcript.relation.as_str(),
+            score,
+        ),
+        session_id: Some(session_id.to_string()),
+        handoff: None,
+    })
+}
+
+pub fn pick_best_match<'a>(
     related: &[(&'a IndexedSource, &'a IndexedTranscript)],
     prompt: &str,
-) -> Option<(&'a IndexedSource, &'a IndexedTranscript)> {
+) -> Option<(&'a IndexedSource, &'a IndexedTranscript, f32)> {
     if related
         .iter()
         .all(|(_, transcript)| transcript.summary_text.is_empty())
@@ -163,7 +199,8 @@ fn pick_best_match<'a>(
         return None;
     }
     let position = best.id.parse::<usize>().ok()?;
-    related.get(position).copied()
+    let (source, transcript) = related.get(position).copied()?;
+    Some((source, transcript, best.score))
 }
 
 fn contains_any(text: &str, needles: &[&str]) -> bool {
@@ -222,11 +259,15 @@ mod tests {
         };
         let related = vec![(&source, &parser), (&source, &deploy)];
 
-        let (_, picked) = pick_best_match(&related, "resume parser changes please").expect("hit");
+        let (_, picked, score) =
+            pick_best_match(&related, "resume parser changes please").expect("hit");
         assert_eq!(picked.session_id.as_deref(), Some("parser"));
+        assert!(score > 0.0);
 
-        let (_, picked) = pick_best_match(&related, "resume kubernetes rollout").expect("hit");
+        let (_, picked, score) =
+            pick_best_match(&related, "resume kubernetes rollout").expect("hit");
         assert_eq!(picked.session_id.as_deref(), Some("deploy"));
+        assert!(score > 0.0);
     }
 
     #[test]
