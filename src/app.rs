@@ -38,7 +38,15 @@ pub fn run(args: &[String]) -> Result<i32, String> {
         }
         [cmd] if cmd == "sessions" => sessions(),
         [cmd] if cmd == "status" => status(),
-        [cmd] if matches!(cmd.as_str(), "handoff" | "explain") => {
+        [cmd] if cmd == "graph" => graph(10),
+        [cmd, flag, n] if cmd == "graph" && flag == "--top" => {
+            let limit = n
+                .parse::<usize>()
+                .map_err(|_| format!("--top expects a number, got {n}"))?;
+            graph(limit)
+        }
+        [cmd] if cmd == "explain" => explain(),
+        [cmd] if cmd == "handoff" => {
             planned(cmd);
             Ok(2)
         }
@@ -66,6 +74,7 @@ Usage:
   tw init <agent>                    # codex | claude-code
   tw status
   tw sessions
+  tw graph [--top N]                 # mermaid flowchart of workspace + related sessions
   tw handoff
   tw explain
 
@@ -316,6 +325,153 @@ fn status() -> Result<i32, String> {
     }
 
     Ok(0)
+}
+
+fn explain() -> Result<i32, String> {
+    let paths = AppPaths::resolve()?;
+    let sources = read_sources(&paths)?;
+    let enablements = read_enablements(&paths)?;
+    let workspace = env::current_dir().map_err(|err| format!("failed to read cwd: {err}"))?;
+    let index = build_session_index(&sources, &enablements, &workspace)?;
+    let related = index.related_transcripts();
+
+    println!("Threadwise explain");
+    println!("active_workspace: {}", index.workspace.display());
+    println!(
+        "discovered_transcripts: {} parsed: {} related: {}",
+        index.total_transcripts,
+        index.parsed_transcripts,
+        related.len()
+    );
+
+    let Some((source, transcript)) = related.first() else {
+        println!("(no related sessions; nothing to explain)");
+        return Ok(0);
+    };
+
+    let base = match transcript.relation {
+        crate::session_index::WorkspaceRelation::Same => 100u16,
+        crate::session_index::WorkspaceRelation::Nested => 80,
+        crate::session_index::WorkspaceRelation::Parent => 70,
+        crate::session_index::WorkspaceRelation::Unknown => 10,
+        crate::session_index::WorkspaceRelation::Different => 0,
+    };
+    let message_bonus = ((transcript.user_messages + transcript.agent_messages) / 4).min(20) as u16;
+    let task_bonus = if transcript.task_complete > 0 { 5 } else { 0 };
+
+    println!();
+    println!("top_related:");
+    println!("  agent: {}", source.agent);
+    println!(
+        "  session_id: {}",
+        transcript.session_id.as_deref().unwrap_or("unknown")
+    );
+    println!("  path: {}", transcript.display_path);
+    println!("  relation: {}", transcript.relation.as_str());
+    println!("  cwd: {}", transcript.cwd.as_deref().unwrap_or("unknown"));
+    println!(
+        "  cli_version: {}",
+        transcript.cli_version.as_deref().unwrap_or("unknown")
+    );
+    println!("  modified_unix: {}", transcript.modified);
+    println!("  bytes: {}", transcript.bytes);
+    println!();
+    println!("scoring:");
+    println!(
+        "  relation_base: {base:>3}   ({})",
+        transcript.relation.as_str()
+    );
+    println!(
+        "  message_bonus: {message_bonus:>3}   (u={} a={}, capped at 20)",
+        transcript.user_messages, transcript.agent_messages
+    );
+    println!(
+        "  task_bonus:    {task_bonus:>3}   (task_complete={})",
+        transcript.task_complete
+    );
+    println!("  total:         {:>3}", transcript.score);
+    println!();
+    println!("signals:");
+    println!("  events: {}", transcript.events);
+    println!("  parse_errors: {}", transcript.parse_errors);
+    println!(
+        "  summary_text_chars: {}",
+        transcript.summary_text.chars().count()
+    );
+    let preview: String = transcript
+        .summary_text
+        .chars()
+        .take(160)
+        .collect::<String>()
+        .replace('\n', " ");
+    println!("  summary_text_preview: {preview:?}");
+
+    Ok(0)
+}
+
+fn graph(top: usize) -> Result<i32, String> {
+    let paths = AppPaths::resolve()?;
+    let sources = read_sources(&paths)?;
+    let enablements = read_enablements(&paths)?;
+    let workspace = env::current_dir().map_err(|err| format!("failed to read cwd: {err}"))?;
+    let index = build_session_index(&sources, &enablements, &workspace)?;
+
+    println!("%% paste into https://mermaid.live or any markdown viewer");
+    println!("flowchart LR");
+    println!(
+        "    W[\"workspace<br/>{}\"]",
+        mermaid_escape(&index.workspace.display().to_string())
+    );
+
+    for (s_idx, source) in index.sources.iter().enumerate() {
+        let advice = if source.advice_enabled { "on" } else { "off" };
+        println!(
+            "    S{s_idx}[\"{agent}<br/>{path}<br/>advice={advice} transcripts={count}\"]",
+            agent = source.agent,
+            path = mermaid_escape(&source.path.display().to_string()),
+            count = source.transcripts.len(),
+        );
+        println!("    W --- S{s_idx}");
+
+        let mut related: Vec<&crate::session_index::IndexedTranscript> = source
+            .transcripts
+            .iter()
+            .filter(|t| t.relation.is_related())
+            .collect();
+        related.sort_by(|left, right| {
+            right
+                .score
+                .cmp(&left.score)
+                .then_with(|| right.modified.cmp(&left.modified))
+        });
+
+        for (t_idx, transcript) in related.iter().take(top).enumerate() {
+            let id = format!("T{s_idx}_{t_idx}");
+            let session = transcript.session_id.as_deref().unwrap_or("?");
+            let short: String = session.chars().take(8).collect();
+            println!(
+                "    {id}[\"{short}<br/>{relation}<br/>score={score} u={u} a={a}\"]",
+                relation = transcript.relation.as_str(),
+                score = transcript.score,
+                u = transcript.user_messages,
+                a = transcript.agent_messages,
+            );
+            let edge = if t_idx == 0 { "==>" } else { "-->" };
+            println!("    S{s_idx} {edge} {id}");
+        }
+        if related.len() > top {
+            println!(
+                "    S{s_idx} -.-> R{s_idx}[\"... {} more related\"]",
+                related.len() - top
+            );
+        }
+    }
+
+    Ok(0)
+}
+
+fn mermaid_escape(text: &str) -> String {
+    text.replace('"', "&quot;")
 }
 
 fn dispatch_hook(sub: &str) -> Result<i32, String> {
