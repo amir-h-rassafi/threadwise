@@ -244,6 +244,13 @@ Done when:
 - Hook is silent for disabled agents and sources.
 - Pre-prompt hook returns within the timeout budget.
 
+Current implementation note: `tw hook codex-user-prompt-submit` parses hook
+JSON from stdin, checks explicit enablement before scanning transcripts, and
+emits conservative metadata-only advice only for explicit split or resume
+phrasing. Disabled hooks, normal prompts, and invalid payloads are silent.
+`tw hook codex-stop` is wired as a quiet enabled-scope no-op until persistent
+index refresh exists.
+
 ### M6: Packaging
 
 Deliver:

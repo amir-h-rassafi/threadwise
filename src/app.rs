@@ -2,6 +2,8 @@ use std::env;
 use std::fs;
 
 use crate::adapters::{adapter_for_kind, available_adapters, print_agent_detection};
+use crate::advice::recommend_for_hook;
+use crate::hooks::{HookKind, read_hook_event};
 use crate::paths::AppPaths;
 use crate::registry::{
     normalize_existing_dir, print_file, read_enablements, read_sources, source_key, source_record,
@@ -41,13 +43,9 @@ pub fn run(args: &[String]) -> Result<i32, String> {
             Ok(2)
         }
         [cmd, sub] if cmd == "hook" && sub == "codex-user-prompt-submit" => {
-            planned("hook codex-user-prompt-submit");
-            Ok(2)
+            hook_codex(HookKind::CodexUserPromptSubmit)
         }
-        [cmd, sub] if cmd == "hook" && sub == "codex-stop" => {
-            planned("hook codex-stop");
-            Ok(2)
-        }
+        [cmd, sub] if cmd == "hook" && sub == "codex-stop" => hook_codex(HookKind::CodexStop),
         _ => {
             print_help();
             Ok(2)
@@ -316,6 +314,43 @@ fn status() -> Result<i32, String> {
         println!("next: start or resume an agent in this workspace");
     } else {
         println!("next: tw sessions");
+    }
+
+    Ok(0)
+}
+
+fn hook_codex(kind: HookKind) -> Result<i32, String> {
+    run_hook("codex", kind)
+}
+
+fn run_hook(agent: &str, kind: HookKind) -> Result<i32, String> {
+    let event = read_hook_event(agent, kind)?;
+    let _metadata_seen = (
+        event.kind.as_str(),
+        event.transcript_path.as_deref(),
+        event.pid,
+        event.parent_pid,
+    );
+    let paths = AppPaths::resolve()?;
+    let sources = read_sources(&paths)?;
+    let enablements = read_enablements(&paths)?;
+
+    let enabled = sources.iter().any(|source| {
+        source.agent == event.agent
+            && (enablements.is_enabled(&source.agent)
+                || enablements.is_enabled(&source.path.display().to_string()))
+    });
+    if !enabled {
+        return Ok(0);
+    }
+
+    if kind == HookKind::CodexStop {
+        return Ok(0);
+    }
+
+    let index = build_session_index(&sources, &enablements, &event.cwd)?;
+    if let Some(recommendation) = recommend_for_hook(&index, &event) {
+        println!("{}", recommendation.render());
     }
 
     Ok(0)

@@ -1,5 +1,7 @@
 mod adapters;
+mod advice;
 mod app;
+mod hooks;
 mod paths;
 mod registry;
 mod session_index;

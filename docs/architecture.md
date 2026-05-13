@@ -167,9 +167,13 @@ Current core slice:
   `different_workspace`, or `unknown_workspace`.
 - It scores related sessions from workspace relation plus lightweight activity
   signals. Agent kind and version remain metadata only.
-- It intentionally does not emit advice yet. The next layers should consume the
-  same index for hook decisions, handoff generation, FTS, embeddings, and
-  LanceDB-backed lookup.
+- `hooks` parses Codex hook JSON from stdin with flexible field names for cwd,
+  prompt, session id, transcript path, pid, and parent pid.
+- `advice` consumes the session index for conservative metadata-only hook
+  recommendations. Disabled hooks, invalid payloads, and normal prompts stay
+  silent.
+- The next layers should add persisted hook events, handoff history, FTS,
+  embeddings, and LanceDB-backed lookup.
 
 Adapter responsibilities:
 
