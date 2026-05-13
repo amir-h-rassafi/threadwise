@@ -1,7 +1,13 @@
-.PHONY: build test check fmt fmt-check lint clippy run doctor clean ci
+.PHONY: build test check fmt fmt-check lint clippy run doctor clean ci install uninstall
 
 build:
 	cargo build
+
+install:
+	cargo install --path . --locked
+
+uninstall:
+	cargo uninstall threadwise
 
 test:
 	cargo test
